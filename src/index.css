@@ -1,0 +1,60 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --font-sans: "Cairo", "IBM Plex Sans Arabic", system-ui, -apple-system, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+  }
+
+  html {
+    font-family: var(--font-sans);
+    direction: rtl;
+  }
+
+  body {
+    background-color: #f8fafc;
+    color: #0f172a;
+    transition: background-color 180ms ease, color 180ms ease;
+  }
+
+  html.dark body {
+    background-color: #060d1c;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 85% 0%, rgba(37, 99, 235, 0.14), transparent 55%),
+      radial-gradient(ellipse 70% 50% at 10% 100%, rgba(20, 184, 166, 0.1), transparent 55%);
+    color: #f1f5f9;
+  }
+}
+
+.font-mono-tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Cinematic glass surface helpers */
+.glass-panel {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+}
+
+html.dark .glass-panel {
+  background-color: rgba(15, 27, 51, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.glass-surface-subtle {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+html.dark .glass-surface-subtle {
+  background-color: rgba(11, 20, 40, 0.65);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
