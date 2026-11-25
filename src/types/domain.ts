@@ -318,7 +318,7 @@ export interface Vat3AArchiveFilters {
 }
 
 export type UrgentAlertDays = 3 | 5;
-export type UrgentAlertMotionMode = 'repeat_5s' | 'continuous';
+export type UrgentAlertMotionMode = 'repeat_5s' | 'continuous' | 'strong_shake';
 
 export interface AppPreferences {
   theme: ThemeMode;

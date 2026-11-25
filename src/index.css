@@ -160,6 +160,39 @@ html.dark .glass-surface-subtle {
   }
 }
 
+@keyframes urgentBadgeStrongSeesaw {
+  0%, 100% {
+    transform: rotate(0deg) translate3d(0, 0, 0) scale(1);
+    box-shadow: 0 0 0 1px var(--badge-glow, rgba(239, 68, 68, 0.52)),
+      0 0 10px var(--badge-glow-soft, rgba(239, 68, 68, 0.2));
+  }
+  8% {
+    transform: rotate(-4.5deg) translate3d(2px, -2px, 0) scale(1.045);
+    box-shadow: 0 0 0 2px var(--badge-glow, rgba(239, 68, 68, 0.72)),
+      0 0 16px var(--badge-glow, rgba(239, 68, 68, 0.4));
+  }
+  16% {
+    transform: rotate(4.5deg) translate3d(-2px, 2px, 0) scale(1.045);
+  }
+  24% {
+    transform: rotate(-4deg) translate3d(1.5px, -2px, 0) scale(1.035);
+  }
+  32% {
+    transform: rotate(4deg) translate3d(-1.5px, 2px, 0) scale(1.035);
+  }
+  40% {
+    transform: rotate(-3deg) translate3d(1px, -1.5px, 0) scale(1.025);
+  }
+  48% {
+    transform: rotate(3deg) translate3d(-1px, 1.5px, 0) scale(1.02);
+  }
+  56% {
+    transform: rotate(0deg) translate3d(0, 0, 0) scale(1);
+    box-shadow: 0 0 0 1.5px var(--badge-glow, rgba(239, 68, 68, 0.55)),
+      0 0 10px var(--badge-glow-soft, rgba(239, 68, 68, 0.22));
+  }
+}
+
 .urgent-badge-continuous {
   animation: urgentBadgeGlowPulse 2.1s ease-in-out infinite;
   will-change: transform, box-shadow;
@@ -170,18 +203,26 @@ html.dark .glass-surface-subtle {
   will-change: transform, box-shadow;
 }
 
+.urgent-badge-strong-shake {
+  animation: urgentBadgeStrongSeesaw 1.35s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite;
+  transform-origin: center center;
+  will-change: transform, box-shadow;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .heatmap-glow-dot,
   .label-attention-pulse,
   .urgent-badge-continuous,
-  .urgent-badge-repeat-5s {
+  .urgent-badge-repeat-5s,
+  .urgent-badge-strong-shake {
     animation: none !important;
     transform: none !important;
     opacity: 1;
   }
 
   .urgent-badge-continuous,
-  .urgent-badge-repeat-5s {
+  .urgent-badge-repeat-5s,
+  .urgent-badge-strong-shake {
     box-shadow: 0 0 0 1.5px var(--badge-glow, rgba(245, 158, 11, 0.6)),
       0 0 10px var(--badge-glow-soft, rgba(245, 158, 11, 0.22));
   }

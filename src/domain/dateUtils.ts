@@ -355,11 +355,11 @@ export function evaluateUrgentAlert(
 
 export function getUrgentAlertMotionClass(
   isUrgentAlert: boolean,
-  motionMode: 'repeat_5s' | 'continuous'
+  motionMode: 'repeat_5s' | 'continuous' | 'strong_shake'
 ): string {
   if (!isUrgentAlert) return '';
-  return motionMode === 'continuous'
-    ? 'urgent-badge-continuous'
-    : 'urgent-badge-repeat-5s';
+  if (motionMode === 'continuous') return 'urgent-badge-continuous';
+  if (motionMode === 'strong_shake') return 'urgent-badge-strong-shake';
+  return 'urgent-badge-repeat-5s';
 }
 

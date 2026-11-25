@@ -437,14 +437,15 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col lg:flex-row">
-      {/* Desktop Right Collapsible Sidebar */}
+    <div className="min-h-screen flex flex-col overflow-x-clip">
+      {/* Desktop Fixed Right Collapsible Sidebar (outside scrollable content container) */}
       <aside
-        className={`hidden lg:flex flex-col shrink-0 border-l border-slate-200 dark:border-white/10 bg-white/95 dark:bg-[#0c0d11]/90 backdrop-blur-md transition-[width] duration-200 ${
+        aria-label="القائمة الجانبية الرئيسية"
+        className={`hidden lg:flex lg:fixed lg:inset-y-0 lg:right-0 lg:z-40 flex-col border-l border-slate-200 dark:border-white/10 bg-white/95 dark:bg-[#0c0d11]/92 backdrop-blur-md transition-[width] duration-200 ${
           sidebarCollapsed ? 'w-[76px]' : 'w-[264px]'
         }`}
       >
-        <div className="flex items-center justify-between gap-2 px-4 h-16 border-b border-slate-200 dark:border-white/10">
+        <div className="shrink-0 flex items-center justify-between gap-2 px-4 h-16 border-b border-slate-200 dark:border-white/10">
           {!sidebarCollapsed && (
             <div className="min-w-0">
               <div className="flex items-center gap-2">
@@ -463,7 +464,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             title={sidebarCollapsed ? 'فتح القائمة الجانبية' : 'طي القائمة الجانبية'}
             aria-label={sidebarCollapsed ? 'فتح القائمة الجانبية' : 'طي القائمة الجانبية'}
-            className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10 mx-auto lg:mx-0"
+            className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 mx-auto lg:mx-0"
           >
             {sidebarCollapsed ? (
               <ChevronLeft className="w-4 h-4" />
@@ -473,7 +474,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           </button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto p-3 space-y-4">
+        <nav className="flex-1 min-h-0 overflow-y-auto p-3 pb-5 space-y-4">
           {navGroups.map((grp) => {
             const isGroupCollapsed = db.preferences.navGroupCollapsed[grp.groupKey] ?? false;
             return (
@@ -517,28 +518,14 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             );
           })}
         </nav>
-
-        <div className="p-3 border-t border-slate-200 dark:border-white/10">
-          <button
-            type="button"
-            onClick={toggleTheme}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-medium border border-slate-200 dark:border-white/15 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
-            title={isDark ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع السينمائي'}
-          >
-            {isDark ? (
-              <Sun className="w-4 h-4 text-amber-400" />
-            ) : (
-              <Moon className="w-4 h-4 text-slate-600" />
-            )}
-            {!sidebarCollapsed && (
-              <span>{isDark ? 'الوضع النهاري' : 'الوضع السينمائي'}</span>
-            )}
-          </button>
-        </div>
       </aside>
 
-      {/* Main Column */}
-      <div className="flex-1 flex flex-col min-w-0 pb-20 lg:pb-0">
+      {/* Main Column — dynamically offsets right padding on desktop for open/collapsed fixed sidebar */}
+      <div
+        className={`flex-1 flex flex-col min-w-0 pb-20 lg:pb-0 transition-[padding] duration-200 ${
+          sidebarCollapsed ? 'lg:pr-[76px]' : 'lg:pr-[264px]'
+        }`}
+      >
         {/* Top Bar (Compact on mobile <= 56px) */}
         <header className="sticky top-0 z-30 h-14 lg:h-16 px-3 lg:px-6 flex items-center justify-between gap-3 border-b border-slate-200 dark:border-white/10 bg-white/90 dark:bg-[#0a0b0f]/88 backdrop-blur-md">
           {/* Mobile Brand */}
@@ -620,24 +607,35 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             )}
           </div>
 
-          {/* Header Actions */}
+          {/* Header Actions (Theme Switch + Notifications Bell on Left Side in RTL) */}
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={toggleTheme}
-              title={isDark ? 'الوضع النهاري' : 'الوضع السينمائي'}
-              aria-label="تبديل المظهر"
-              className="lg:hidden min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl border border-slate-200 dark:border-white/15 text-slate-700 dark:text-slate-200"
+              title={isDark ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع السينمائي'}
+              aria-label={isDark ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع السينمائي'}
+              className="h-10 w-10 flex items-center justify-center rounded-xl border border-slate-200 dark:border-white/15 bg-white/80 dark:bg-white/[0.04] text-slate-700 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors shrink-0"
             >
-              {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
+              {isDark ? (
+                <Sun className="w-4 h-4 text-amber-400" />
+              ) : (
+                <Moon className="w-4 h-4 text-slate-700 dark:text-slate-200" />
+              )}
             </button>
 
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setAlertsOpen(!alertsOpen)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape' && alertsOpen) {
+                    setAlertsOpen(false);
+                  }
+                }}
                 aria-label="التنبيهات"
-                className="min-h-[40px] px-2.5 flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-white/15 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+                aria-expanded={alertsOpen}
+                aria-haspopup="dialog"
+                className="h-10 px-2.5 flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-white/15 bg-white/80 dark:bg-white/[0.04] text-slate-700 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors shrink-0"
               >
                 <Bell className="w-4 h-4" />
                 <span className="text-xs font-bold font-mono-tabular">{alerts.length}</span>

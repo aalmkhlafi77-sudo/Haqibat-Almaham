@@ -232,8 +232,12 @@ export function migrateDatabaseState(
   const rawAlertDays = parsed.preferences?.urgentAlertDays;
   const urgentAlertDays: 3 | 5 = rawAlertDays === 5 ? 5 : 3;
   const rawAlertMotion = parsed.preferences?.urgentAlertMotion;
-  const urgentAlertMotion: 'repeat_5s' | 'continuous' =
-    rawAlertMotion === 'continuous' ? 'continuous' : 'repeat_5s';
+  const urgentAlertMotion: 'repeat_5s' | 'continuous' | 'strong_shake' =
+    rawAlertMotion === 'continuous'
+      ? 'continuous'
+      : rawAlertMotion === 'strong_shake'
+      ? 'strong_shake'
+      : 'repeat_5s';
 
   return {
     organizations: parsed.organizations ?? fallback.organizations,

@@ -265,6 +265,7 @@ export const SettingsView: React.FC = () => {
                 نمط الحركة
               </label>
               <select
+                aria-label="نمط حركة الشارات العاجلة"
                 value={db.preferences.urgentAlertMotion}
                 onChange={(e) =>
                   setUrgentAlertMotion(e.target.value as UrgentAlertMotionMode)
@@ -273,6 +274,7 @@ export const SettingsView: React.FC = () => {
               >
                 <option value="repeat_5s">تكرار كل 5 ثوانٍ (توهج واهتزاز لطيف)</option>
                 <option value="continuous">نبض مستمر (توهج هادئ)</option>
+                <option value="strong_shake">اهتزاز قوي ملفت (تأرجح سريع من الأطراف)</option>
               </select>
             </div>
           </div>
