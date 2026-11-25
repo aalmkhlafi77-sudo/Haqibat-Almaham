@@ -111,8 +111,11 @@ export function createBackupEnvelope(
     aiStatusMessage: 'حالة افتراضية ضمن النسخة الاحتياطية.',
   };
 
-  const counts = computeBackupSummaryCounts(sanitized);
-  const integrityHash = computeBackupIntegrityHash(sanitized);
+  // Serialize and parse back to ensure undefined fields are stripped identically to JSON.stringify
+  const finalPayload = JSON.parse(JSON.stringify(sanitized)) as AppDatabaseState;
+
+  const counts = computeBackupSummaryCounts(finalPayload);
+  const integrityHash = computeBackupIntegrityHash(finalPayload);
 
   return {
     appId: 'haqibat-almaham',
@@ -126,7 +129,7 @@ export function createBackupEnvelope(
         : 'في المعاينة المحلية تُصدّر السجلات والروابط والتصنيفات وأنواع المهام والملصقات ومسودات وأرشيف 3A وقواعدها؛ وتُدار المرفقات الثنائية ضمن خطة النسخ في الخادم المشترك.',
     integrityHash,
     counts,
-    payload: sanitized,
+    payload: finalPayload,
   };
 }
 
