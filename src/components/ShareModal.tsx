@@ -1,21 +1,41 @@
 import React, { useEffect, useState } from 'react';
-import { ExternalLink, Mail, MessageCircle, UserCheck, X } from 'lucide-react';
+import {
+  Download,
+  ExternalLink,
+  FileSpreadsheet,
+  Mail,
+  MessageCircle,
+  Share2,
+  UserCheck,
+  X,
+} from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { formatDateTime, formatDisplayDate } from '../domain/dateUtils';
 import { buildExternalShareUrl, buildRecordDeepLink } from '../domain/shareUtils';
+import {
+  buildVat3APdfBlob,
+  downloadVat3AExcel,
+  downloadVat3APdf,
+} from '../domain/vat3aExport';
 import { ShareChannel } from '../types/domain';
 
 export const ShareModal: React.FC = () => {
-  const { db, shareTarget, closeShareModal, logShareOpened } = useApp();
+  const { db, shareTarget, closeShareModal, logShareOpened, showToast } = useApp();
   const [selectedSpecialistId, setSelectedSpecialistId] = useState<string>('');
   const [channel, setChannel] = useState<ShareChannel>('whatsapp');
   const [messageText, setMessageText] = useState('');
+  const [sharingDevice, setSharingDevice] = useState(false);
 
   useEffect(() => {
     if (!shareTarget) return;
     const initialSpecId = shareTarget.specialistId || '';
     setSelectedSpecialistId(initialSpecId);
     setChannel('whatsapp');
+
+    if (shareTarget.recordType === 'vat_3a') {
+      setMessageText(shareTarget.defaultMessage);
+      return;
+    }
 
     const { url } = buildRecordDeepLink(shareTarget.recordType, shareTarget.recordId);
     const baseMsg = url
@@ -26,9 +46,12 @@ export const ShareModal: React.FC = () => {
 
   if (!shareTarget) return null;
 
+  const isVat3a = shareTarget.recordType === 'vat_3a' && !!shareTarget.vatDraft;
   const specialist = db.specialists.find((s) => s.id === selectedSpecialistId) || null;
   const formattedDue = shareTarget.scheduledInfo.includes('T')
     ? formatDateTime(shareTarget.scheduledInfo, db.preferences.showHijri)
+    : isVat3a
+    ? shareTarget.scheduledInfo
     : formatDisplayDate(shareTarget.scheduledInfo, db.preferences.showHijri);
 
   const externalUrl = specialist
@@ -46,26 +69,84 @@ export const ShareModal: React.FC = () => {
       e.preventDefault();
       return;
     }
-    logShareOpened(shareTarget, specialist, channel, messageText);
+    logShareOpened(shareTarget, specialist, channel, messageText, 'فُتحت المشاركة');
     closeShareModal();
+  };
+
+  const handleDeviceShare = async () => {
+    if (!shareTarget.vatDraft) return;
+    setSharingDevice(true);
+    try {
+      const pdfBlob = await buildVat3APdfBlob(shareTarget.vatDraft);
+      const fileName = `VAT_3A_${shareTarget.vatDraft.periodStart}.pdf`;
+      const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        const canShareFiles =
+          typeof navigator.canShare === 'function' &&
+          navigator.canShare({ files: [pdfFile] });
+
+        if (canShareFiles) {
+          await navigator.share({
+            title: shareTarget.recordTitle,
+            text: messageText,
+            files: [pdfFile],
+          });
+          logShareOpened(
+            shareTarget,
+            specialist,
+            'device',
+            messageText,
+            'تمت المشاركة عبر الجهاز'
+          );
+          closeShareModal();
+          return;
+        }
+
+        await navigator.share({
+          title: shareTarget.recordTitle,
+          text: messageText,
+        });
+        logShareOpened(
+          shareTarget,
+          specialist,
+          'device',
+          messageText,
+          'تمت المشاركة عبر الجهاز'
+        );
+        closeShareModal();
+        return;
+      }
+
+      // Browser doesn't support Web Share API -> download PDF directly as honest fallback
+      await downloadVat3APdf(shareTarget.vatDraft);
+      logShareOpened(shareTarget, specialist, 'device', messageText, 'فُتحت المشاركة');
+      showToast('المتصفح لا يدعم المشاركة المباشرة للملفات؛ تم تنزيل PDF لإرفاقه يدويًا.');
+    } catch (err) {
+      if ((err as Error)?.name !== 'AbortError') {
+        showToast('تعذّر إكمال المشاركة عبر الجهاز — يمكنك تنزيل PDF أو Excel وإرفاقه يدويًا.');
+      }
+    } finally {
+      setSharingDevice(false);
+    }
   };
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-sm p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="مشاركة مع المختص"
+      aria-label="مشاركة السجل"
     >
       <div className="glass-panel w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700/70">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-white/10">
           <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
-            مشاركة مع المختص (يدويًا)
+            {isVat3a ? 'مشاركة نموذج ضريبة القيمة المضافة 3A' : 'مشاركة مع المختص (يدويًا)'}
           </h3>
           <button
             type="button"
             onClick={closeShareModal}
-            className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10"
             aria-label="إغلاق"
           >
             <X className="w-4 h-4" />
@@ -77,21 +158,57 @@ export const ShareModal: React.FC = () => {
             <div className="font-semibold text-slate-900 dark:text-slate-100">
               {shareTarget.recordTitle}
             </div>
-            <div className="text-xs text-slate-600 dark:text-slate-300">
-              الموعد / الاستحقاق: <span className="font-medium">{formattedDue}</span>
+            <div className="text-xs text-slate-600 dark:text-slate-300 font-mono-tabular">
+              {isVat3a ? 'الفترة:' : 'الموعد / الاستحقاق:'}{' '}
+              <span className="font-medium">{formattedDue}</span>
             </div>
           </div>
 
+          {isVat3a && shareTarget.vatDraft && (
+            <div className="space-y-2">
+              <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                مشاركة أو تنزيل مرفقات الإقرار
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  disabled={sharingDevice}
+                  onClick={handleDeviceShare}
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-semibold disabled:opacity-60"
+                >
+                  <Share2 className="w-4 h-4" />
+                  <span>{sharingDevice ? 'جارٍ التجهيز...' : 'مشاركة عبر الجهاز'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadVat3APdf(shareTarget.vatDraft!)}
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-white/10"
+                >
+                  <Download className="w-4 h-4 text-rose-500" />
+                  <span>تحميل PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadVat3AExcel(shareTarget.vatDraft!)}
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-white/10"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
+                  <span>تحميل Excel</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-              المختص المستلم {!shareTarget.specialistId && '(السجل غير مسند — اختر مستلمًا)'}
+              المختص المستلم {!shareTarget.specialistId && '(اختر مستلمًا لفتح واتساب أو البريد)'}
             </label>
             <div className="flex items-center gap-2">
               <UserCheck className="w-4 h-4 text-slate-400 shrink-0" />
               <select
                 value={selectedSpecialistId}
                 onChange={(e) => setSelectedSpecialistId(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">— اختر المختص —</option>
                 {db.specialists.map((sp) => (
@@ -103,16 +220,20 @@ export const ShareModal: React.FC = () => {
             </div>
             {specialist && (
               <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-600 dark:text-slate-300">
-                <span>الجوال: <span className="font-mono-tabular">{specialist.mobile}</span></span>
+                <span>
+                  الجوال: <span className="font-mono-tabular">{specialist.mobile}</span>
+                </span>
                 <span>·</span>
-                <span>البريد: <span className="font-mono-tabular">{specialist.email}</span></span>
+                <span>
+                  البريد: <span className="font-mono-tabular">{specialist.email}</span>
+                </span>
               </div>
             )}
           </div>
 
           <div>
             <span className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-              قناة المشاركة
+              قناة المشاركة المباشرة
             </span>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -121,7 +242,7 @@ export const ShareModal: React.FC = () => {
                 className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border text-sm font-medium transition-colors ${
                   channel === 'whatsapp'
                     ? 'bg-emerald-50 border-emerald-500 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200 dark:border-emerald-500'
-                    : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                    : 'border-slate-200 dark:border-white/15 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
                 }`}
               >
                 <MessageCircle className="w-4 h-4" />
@@ -133,7 +254,7 @@ export const ShareModal: React.FC = () => {
                 className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border text-sm font-medium transition-colors ${
                   channel === 'email'
                     ? 'bg-blue-50 border-blue-500 text-blue-800 dark:bg-blue-950/60 dark:text-blue-200 dark:border-blue-500'
-                    : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                    : 'border-slate-200 dark:border-white/15 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
                 }`}
               >
                 <Mail className="w-4 h-4" />
@@ -144,27 +265,27 @@ export const ShareModal: React.FC = () => {
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-              نص الرسالة قبل الفتح
+              نص الرسالة / الملخص قبل الفتح
             </label>
             <textarea
               rows={5}
               value={messageText}
               onChange={(e) => setMessageText(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
-              ملاحظة المعاينة: يفتح الرابط المرفق السجل على هذا المتصفح فقط لأن البيانات محفوظة محليًا في المرحلة الأولى، وعند فتح القناة يُسجّل الحدث بحالة «فُتحت المشاركة» بينما يتم الإرسال الفعلي من التطبيق الخارجي.
+              عند فتح واتساب أو البريد الإلكتروني يُسجّل الحدث بحالة «فُتحت المشاركة» ويتم الإرسال الفعلي من التطبيق الخارجي.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-slate-200 dark:border-slate-700/70">
+        <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-slate-200 dark:border-white/10">
           <button
             type="button"
             onClick={closeShareModal}
-            className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10"
           >
-            إلغاء
+            إغلاق
           </button>
           <a
             href={externalUrl}
@@ -175,11 +296,13 @@ export const ShareModal: React.FC = () => {
             className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
               specialist
                 ? 'bg-blue-600 text-white hover:bg-blue-700'
-                : 'bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500 pointer-events-none'
+                : 'bg-slate-200 text-slate-500 dark:bg-white/10 dark:text-slate-500 pointer-events-none'
             }`}
           >
             <ExternalLink className="w-4 h-4" />
-            <span>{channel === 'whatsapp' ? 'فتح واتساب وتسجيل المشاركة' : 'فتح البريد وتسجيل المشاركة'}</span>
+            <span>
+              {channel === 'whatsapp' ? 'فتح واتساب وتسجيل المشاركة' : 'فتح البريد وتسجيل المشاركة'}
+            </span>
           </a>
         </div>
       </div>

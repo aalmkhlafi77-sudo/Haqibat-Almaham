@@ -1,5 +1,7 @@
 import { addDaysISO, getTodayISO } from '../domain/dateUtils';
 import {
+  buildDefaultVat3ARulesConfig,
+  buildLegacyVat3ARulesSnapshot,
   createEmptyVat3ALines,
   evaluateVat3ADraft,
   VAT_3A_RULES_VERSION,
@@ -8,11 +10,21 @@ import { AppDatabaseState, AppPreferences, Vat3ADraft } from '../types/domain';
 
 export function buildDefaultPreferences(): AppPreferences {
   return {
-    theme: 'light', // Approved by project owner: Light Day default
+    theme: 'light',
     sidebarCollapsed: false,
-    showHijri: false, // Approved by project owner: Gregorian default + optional Hijri
+    showHijri: false,
     currentSpecialistId: 'spec-01',
-    documentWarningDays: 30, // Proposed default (30 days)
+    documentWarningDays: 30,
+    vat3aRules: buildDefaultVat3ARulesConfig(),
+    integrations: {
+      serverBaseUrl: '',
+      serverStatus: 'disconnected',
+      serverStatusMessage: 'لم يُربط خادم التطبيق بعد — يعمل النظام محليًا.',
+      aiProvider: 'server_gemini',
+      aiModelName: 'gemini-2.5-flash',
+      aiStatus: 'disconnected',
+      aiStatusMessage: 'غير متصل — يتطلب ربط الخادم لإدارة مفاتيح الذكاء الاصطناعي.',
+    },
     collapsedSections: {},
     navGroupCollapsed: {},
     taskFilters: {
@@ -41,6 +53,8 @@ export function createSeedDatabase(): AppDatabaseState {
   const today = getTodayISO();
   const nowIso = `${today}T09:00:00`;
 
+  const legacySnapshot = buildLegacyVat3ARulesSnapshot();
+
   const lines1 = createEmptyVat3ALines();
   lines1[1] = { amountRaw: '145000', adjustmentRaw: '2500' };
   lines1[3] = { amountRaw: '12000', adjustmentRaw: '' };
@@ -58,6 +72,7 @@ export function createSeedDatabase(): AppDatabaseState {
     periodEnd: '2026-09-30',
     status: 'مسودة',
     calcRulesVersion: VAT_3A_RULES_VERSION,
+    rulesSnapshot: legacySnapshot,
     editorName: 'أحمد العتيبي',
     isTestSample: false,
     lines: lines1,
@@ -82,6 +97,7 @@ export function createSeedDatabase(): AppDatabaseState {
     periodEnd: '2026-06-30',
     status: 'مؤرشفة',
     calcRulesVersion: VAT_3A_RULES_VERSION,
+    rulesSnapshot: legacySnapshot,
     editorName: 'سارة القحطاني',
     isTestSample: false,
     lines: lines2,
@@ -290,7 +306,7 @@ export function createSeedDatabase(): AppDatabaseState {
         issuingAuthority: 'هيئة الزكاة والضريبة والجمارك',
         specialistId: 'spec-04',
         issueDate: addDaysISO(today, -365),
-        expiryDate: today, // Expires TODAY (must be distinct from past expired!)
+        expiryDate: today,
         notes: 'تنتهي اليوم — يجب سداد الفاتورة وإصدار الشهادة المحدثة.',
         renewals: [],
         archivedAt: null,
@@ -306,7 +322,7 @@ export function createSeedDatabase(): AppDatabaseState {
         issuingAuthority: 'أمانة محافظة جدة',
         specialistId: 'spec-02',
         issueDate: addDaysISO(today, -380),
-        expiryDate: addDaysISO(today, -5), // Past expired
+        expiryDate: addDaysISO(today, -5),
         notes: 'متأخرة منذ 5 أيام بسبب انتظار عقد الإيجار الموثق.',
         renewals: [],
         archivedAt: null,
@@ -322,7 +338,7 @@ export function createSeedDatabase(): AppDatabaseState {
         issuingAuthority: 'وزارة التجارة',
         specialistId: 'spec-02',
         issueDate: addDaysISO(today, -180),
-        expiryDate: addDaysISO(today, 185), // Valid
+        expiryDate: addDaysISO(today, 185),
         notes: 'سارٍ ومحدث عبر المركز السعودي للأعمال.',
         renewals: [],
         archivedAt: null,
@@ -338,7 +354,7 @@ export function createSeedDatabase(): AppDatabaseState {
         issuingAuthority: 'وزارة التجارة — التوثيق',
         specialistId: 'spec-01',
         issueDate: addDaysISO(today, -900),
-        expiryDate: null, // No expiry date
+        expiryDate: null,
         notes: 'وثيقة دائمة بلا تاريخ انتهاء — تبقى للمتابعة عند تعديل الشركاء.',
         renewals: [],
         archivedAt: null,
@@ -372,7 +388,7 @@ export function createSeedDatabase(): AppDatabaseState {
         departmentName: 'الشؤون القانونية',
         priority: 'عاجلة',
         status: 'قيد التنفيذ',
-        dueDate: today, // Due today
+        dueDate: today,
         actualDeliveryDate: null,
         caseId: 'case-01',
         sessionId: 'sess-01',
@@ -390,7 +406,7 @@ export function createSeedDatabase(): AppDatabaseState {
         departmentName: 'العمليات الإدارية',
         priority: 'مرتفعة',
         status: 'قيد التنفيذ',
-        dueDate: addDaysISO(today, -3), // Overdue open task!
+        dueDate: addDaysISO(today, -3),
         actualDeliveryDate: null,
         letterNumber: 'خ-1142/1447',
         authorityName: 'وزارة الموارد البشرية والتنمية الاجتماعية',
@@ -427,7 +443,7 @@ export function createSeedDatabase(): AppDatabaseState {
         priority: 'متوسطة',
         status: 'مكتملة',
         dueDate: addDaysISO(today, -10),
-        actualDeliveryDate: addDaysISO(today, -7), // Completed 3 days LATE -> "سُلّمت متأخرة"
+        actualDeliveryDate: addDaysISO(today, -7),
         letterNumber: 'غ-904/2026',
         authorityName: 'الغرفة التجارية بالرياض',
         receivedDate: addDaysISO(today, -14),
@@ -446,7 +462,7 @@ export function createSeedDatabase(): AppDatabaseState {
         priority: 'متوسطة',
         status: 'مكتملة',
         dueDate: addDaysISO(today, -6),
-        actualDeliveryDate: addDaysISO(today, -6), // Completed on time
+        actualDeliveryDate: addDaysISO(today, -6),
         caseId: 'case-02',
         notes: 'تم الربط الإلكتروني بنجاح.',
         archivedAt: null,
@@ -496,7 +512,7 @@ export function createSeedDatabase(): AppDatabaseState {
         title: 'اجتماع متابعة تجديد التراخيص الربع سنوية',
         scheduledAt: `${addDaysISO(today, 3)}T11:00`,
         isAllDay: false,
-        specialistId: null, // Intentionally unassigned so user can test choosing specialist in Share modal!
+        specialistId: null,
         linkedRecordType: 'document',
         linkedRecordId: 'doc-01',
         notes: 'مناقشة خطة تجديد الدفاع المدني وفرع جدة.',

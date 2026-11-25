@@ -6,6 +6,7 @@ export type NavSection =
   | 'documents'
   | 'cases'
   | 'calendar'
+  | 'reports'
   | 'specialists'
   | 'vat3a'
   | 'settings';
@@ -50,11 +51,9 @@ export interface TaskItem {
   status: TaskStatus;
   dueDate: string; // YYYY-MM-DD (DATE without time)
   actualDeliveryDate?: string | null; // YYYY-MM-DD
-  // Administrative task fields
   letterNumber?: string;
   authorityName?: string;
   receivedDate?: string | null; // YYYY-MM-DD
-  // Optional operational links
   documentId?: string | null;
   caseId?: string | null;
   sessionId?: string | null;
@@ -71,7 +70,7 @@ export interface DocumentRenewal {
   newExpiryDate: string;
   notes: string;
   actorName: string;
-  renewedAt: string; // ISO datetime
+  renewedAt: string;
 }
 
 export interface DocumentItem {
@@ -82,8 +81,8 @@ export interface DocumentItem {
   referenceNumber: string;
   issuingAuthority: string;
   specialistId: string | null;
-  issueDate?: string | null; // YYYY-MM-DD
-  expiryDate?: string | null; // YYYY-MM-DD or null for "بلا تاريخ"
+  issueDate?: string | null;
+  expiryDate?: string | null;
   notes?: string;
   renewals: DocumentRenewal[];
   archivedAt?: string | null;
@@ -115,7 +114,7 @@ export interface SessionItem {
   orgId: string;
   caseId: string;
   title: string;
-  scheduledAt: string; // YYYY-MM-DDTHH:mm (DATETIME with explicit time)
+  scheduledAt: string; // YYYY-MM-DDTHH:mm
   status: SessionStatus;
   outcome?: string;
   specialistId: string | null;
@@ -136,8 +135,8 @@ export interface PoaItem {
   agent: string;
   scope: string;
   specialistId: string | null;
-  issueDate: string; // YYYY-MM-DD
-  expiryDate?: string | null; // YYYY-MM-DD
+  issueDate: string;
+  expiryDate?: string | null;
   statusOverride?: 'مفسوخة' | null;
   notes?: string;
   archivedAt?: string | null;
@@ -152,7 +151,7 @@ export interface CalendarItem {
   orgId: string;
   kind: CalendarItemKind;
   title: string;
-  scheduledAt: string; // YYYY-MM-DDTHH:mm
+  scheduledAt: string;
   isAllDay: boolean;
   specialistId: string | null;
   linkedRecordType?: RecordType | null;
@@ -176,19 +175,19 @@ export interface LabelItem {
   updatedAt: string;
 }
 
-export type ShareChannel = 'whatsapp' | 'email';
+export type ShareChannel = 'whatsapp' | 'email' | 'device';
 
 export interface ShareLog {
   id: string;
-  recordType: RecordType | 'document_renewal';
+  recordType: RecordType | 'document_renewal' | 'vat_3a';
   recordId: string;
   recordTitle: string;
-  specialistId: string;
+  specialistId: string | null;
   specialistName: string;
   channel: ShareChannel;
   scheduledInfo: string;
   messageText: string;
-  status: 'فُتحت المشاركة';
+  status: 'فُتحت المشاركة' | 'تمت المشاركة عبر الجهاز';
   openedAt: string;
 }
 
@@ -212,6 +211,21 @@ export type Vat3ALineId =
 
 export type Vat3ADraftStatus = 'مسودة' | 'قيد المراجعة' | 'مؤرشفة';
 
+export type Vat3AAdjustmentDirection = 'add' | 'subtract';
+export type Vat3ATaxMethod = 'rate' | 'zero';
+
+export interface Vat3ALineRuleConfig {
+  adjustmentDirection: Vat3AAdjustmentDirection;
+  taxMethod: Vat3ATaxMethod;
+  /** null means use defaultRatePercent */
+  customRatePercent: number | null;
+}
+
+export interface Vat3ARulesConfig {
+  defaultRatePercent: number; // starts at 15
+  lineRules: Record<number, Vat3ALineRuleConfig>;
+}
+
 export interface Vat3ALineInput {
   amountRaw: string;
   adjustmentRaw: string;
@@ -222,10 +236,11 @@ export interface Vat3ADraft {
   orgId: string;
   entityName: string;
   taxRegistrationNumber: string;
-  periodStart: string; // YYYY-MM-DD
-  periodEnd: string; // YYYY-MM-DD
+  periodStart: string;
+  periodEnd: string;
   status: Vat3ADraftStatus;
   calcRulesVersion: string;
+  rulesSnapshot?: Vat3ARulesConfig;
   editorName: string;
   isTestSample: boolean;
   lines: Record<number, Vat3ALineInput>;
@@ -235,6 +250,18 @@ export interface Vat3ADraft {
   computedNetHalalas: number;
   updatedAt: string;
   archivedAt?: string | null;
+}
+
+export interface IntegrationSettings {
+  serverBaseUrl: string;
+  serverStatus: 'disconnected' | 'connected' | 'error';
+  serverLastCheckedAt?: string;
+  serverStatusMessage?: string;
+  aiProvider: 'server_gemini' | 'server_custom';
+  aiModelName: string;
+  aiStatus: 'disconnected' | 'connected' | 'error';
+  aiLastCheckedAt?: string;
+  aiStatusMessage?: string;
 }
 
 export interface TaskFilters {
@@ -271,7 +298,9 @@ export interface AppPreferences {
   sidebarCollapsed: boolean;
   showHijri: boolean;
   currentSpecialistId: string;
-  documentWarningDays: number; // default 30 (proposed)
+  documentWarningDays: number;
+  vat3aRules: Vat3ARulesConfig;
+  integrations: IntegrationSettings;
   collapsedSections: Record<string, boolean>;
   navGroupCollapsed: Record<string, boolean>;
   taskFilters: TaskFilters;

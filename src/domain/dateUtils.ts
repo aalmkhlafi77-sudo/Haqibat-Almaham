@@ -23,17 +23,28 @@ export function diffDaysISO(fromISO: string, toISO: string): number {
   return Math.round((utc2 - utc1) / 86_400_000);
 }
 
+/**
+ * Normalizes any stray Arabic-Indic digits to English 0-9.
+ */
+export function toEnglishDigits(input: string): string {
+  return input
+    .replace(/[٠-٩]/g, (ch) => String(ch.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (ch) => String(ch.charCodeAt(0) - 0x06f0));
+}
+
 export function formatGregorianDate(dateStr?: string | null): string {
   if (!dateStr) return '—';
   const datePart = dateStr.slice(0, 10);
   const [y, m, d] = datePart.split('-').map(Number);
-  if (!y || !m || !d) return dateStr;
+  if (!y || !m || !d) return toEnglishDigits(dateStr);
   const dt = new Date(y, m - 1, d);
-  return new Intl.DateTimeFormat('ar-SA-u-ca-gregory', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }).format(dt);
+  return toEnglishDigits(
+    new Intl.DateTimeFormat('ar-SA-u-ca-gregory-nu-latn', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    }).format(dt)
+  );
 }
 
 export function formatHijriDate(dateStr?: string | null): string {
@@ -43,14 +54,57 @@ export function formatHijriDate(dateStr?: string | null): string {
   if (!y || !m || !d) return '';
   const dt = new Date(y, m - 1, d);
   try {
-    return new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    }).format(dt);
+    return toEnglishDigits(
+      new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura-nu-latn', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      }).format(dt)
+    );
   } catch {
     return '';
   }
+}
+
+export function formatHijriDayNumber(dateStr: string): string {
+  const datePart = dateStr.slice(0, 10);
+  const [y, m, d] = datePart.split('-').map(Number);
+  if (!y || !m || !d) return '';
+  const dt = new Date(y, m - 1, d);
+  try {
+    return toEnglishDigits(
+      new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura-nu-latn', {
+        day: 'numeric',
+      }).format(dt)
+    );
+  } catch {
+    return '';
+  }
+}
+
+export function formatHijriMonthHeader(year: number, monthIndex: number): string {
+  const start = new Date(year, monthIndex, 1);
+  const end = new Date(year, monthIndex + 1, 0);
+  try {
+    const fmt = new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura-nu-latn', {
+      month: 'long',
+      year: 'numeric',
+    });
+    const s = toEnglishDigits(fmt.format(start));
+    const e = toEnglishDigits(fmt.format(end));
+    return s === e ? s : `${s} / ${e}`;
+  } catch {
+    return '';
+  }
+}
+
+export function formatGregorianMonthHeader(year: number, monthIndex: number): string {
+  return toEnglishDigits(
+    new Intl.DateTimeFormat('ar-SA-u-ca-gregory-nu-latn', {
+      month: 'long',
+      year: 'numeric',
+    }).format(new Date(year, monthIndex, 1))
+  );
 }
 
 export function formatDisplayDate(dateStr?: string | null, showHijri = false): string {
@@ -67,10 +121,12 @@ export function formatTimeFromDateTime(dtStr?: string | null): string {
   const [hh, mm] = (timePart || '').split(':').map(Number);
   if (Number.isNaN(hh) || Number.isNaN(mm)) return '';
   const d = new Date(2026, 0, 1, hh, mm);
-  return new Intl.DateTimeFormat('ar-SA', {
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(d);
+  return toEnglishDigits(
+    new Intl.DateTimeFormat('ar-SA-u-nu-latn', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(d)
+  );
 }
 
 export function formatDateTime(dtStr?: string | null, showHijri = false): string {
@@ -88,11 +144,6 @@ export interface TaskDelayInfo {
   label: string | null;
 }
 
-/**
- * Delay rules from Project Reference v1.0:
- * - Open tasks (not مكتملة / ملغاة): compare dueDate with today. Today is NOT overdue.
- * - Completed tasks: compare actualDeliveryDate with dueDate. Show "سُلّمت متأخرة" if delivered after dueDate.
- */
 export function evaluateTaskDelay(task: TaskItem, todayISO = getTodayISO()): TaskDelayInfo {
   if (task.status === 'ملغاة') {
     return { isOverdue: false, wasDeliveredLate: false, delayDays: 0, label: null };
@@ -140,15 +191,6 @@ export interface DocumentHealthInfo {
   needsFollowUp: boolean;
 }
 
-/**
- * Document classification rules:
- * - Archived documents excluded from active alerts.
- * - No expiryDate -> "بلا تاريخ" (needs follow-up).
- * - Expiry today === todayISO -> "تنتهي اليوم" (NOT treated as past expired!).
- * - Expiry < todayISO -> "منتهية".
- * - Expiry within warningDays (default 30) -> "قريبة الانتهاء".
- * - Otherwise -> "سارية".
- */
 export function evaluateDocumentHealth(
   doc: DocumentItem,
   warningDays = 30,

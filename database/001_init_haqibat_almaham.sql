@@ -256,6 +256,7 @@ CREATE TABLE IF NOT EXISTS `vat_3a_drafts` (
   `period_end` DATE NOT NULL,
   `status` ENUM('مسودة', 'قيد المراجعة', 'مؤرشفة') NOT NULL DEFAULT 'مسودة',
   `calc_rules_version` VARCHAR(32) NOT NULL,
+  `rules_snapshot_json` JSON NULL,
   `editor_name` VARCHAR(180) NOT NULL,
   `is_test_sample` TINYINT(1) NOT NULL DEFAULT 0,
   `item_14_period_ref` VARCHAR(180) NULL,

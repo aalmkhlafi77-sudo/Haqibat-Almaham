@@ -5,6 +5,7 @@ import {
   Pencil,
   Phone,
   Plus,
+  Share2,
   Trash2,
   Users,
   X,
@@ -262,10 +263,16 @@ export const SpecialistsView: React.FC = () => {
                     <span className="inline-flex items-center gap-1">
                       {log.channel === 'whatsapp' ? (
                         <MessageCircle className="w-3 h-3 text-emerald-500" />
+                      ) : log.channel === 'device' ? (
+                        <Share2 className="w-3 h-3 text-violet-500" />
                       ) : (
                         <Mail className="w-3 h-3 text-blue-500" />
                       )}
-                      {log.channel === 'whatsapp' ? 'واتساب' : 'البريد الإلكتروني'}
+                      {log.channel === 'whatsapp'
+                        ? 'واتساب'
+                        : log.channel === 'device'
+                        ? 'عبر الجهاز'
+                        : 'البريد الإلكتروني'}
                     </span>
                     <span>·</span>
                     <span>{formatDateTime(log.openedAt, db.preferences.showHijri)}</span>

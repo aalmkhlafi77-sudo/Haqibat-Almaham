@@ -1,7 +1,17 @@
-import { Vat3ADraft, Vat3ALineId, Vat3ALineInput } from '../types/domain';
+import {
+  Vat3AAdjustmentDirection,
+  Vat3ADraft,
+  Vat3ALineId,
+  Vat3ALineInput,
+  Vat3ALineRuleConfig,
+  Vat3ARulesConfig,
+  Vat3ATaxMethod,
+} from '../types/domain';
 
-export const VAT_3A_RULES_VERSION = '3A-v1.0-preview';
+export const VAT_3A_RULES_VERSION = '3A-v2.0-configurable';
 export const ITEM_14_REVIEW_THRESHOLD_HALALAS = 1_500_000; // 15,000.00 SAR
+
+export const CUSTOMIZABLE_VAT_LINE_IDS: Vat3ALineId[] = [1, 2, 3, 4, 5, 7, 8, 10, 11];
 
 export interface Vat3ALineDefinition {
   id: Vat3ALineId;
@@ -11,7 +21,6 @@ export interface Vat3ALineDefinition {
   rateLabel: string;
   amountEditable: boolean;
   adjustmentEditable: boolean;
-  /** For summary items 14 and 15 where user enters tax directly in VAT column (stored in amountRaw) */
   vatDirectInput?: boolean;
   allowNegativeAmount?: boolean;
   allowNegativeAdjustment?: boolean;
@@ -101,7 +110,7 @@ export const VAT_3A_LINE_DEFINITIONS: Vat3ALineDefinition[] = [
     id: 9,
     name: 'الاستيرادات الخاضعة للاحتساب العكسي',
     section: 'purchases',
-    rateLabel: 'احتساب عكسي',
+    rateLabel: 'احتساب عكسي (وثيقة 3A)',
     amountEditable: true,
     adjustmentEditable: true,
     allowNegativeAmount: false,
@@ -176,6 +185,74 @@ export const VAT_3A_LINE_DEFINITIONS: Vat3ALineDefinition[] = [
   },
 ];
 
+/**
+ * Default rules requested in Phase 2 prompt:
+ * - Default rate 15%
+ * - Line 1 defaults to adjustmentDirection: 'subtract' (يُطرح من المبلغ)
+ * - Lines 7, 8 default to 'add' with 'rate'
+ * - Lines 2, 3, 4, 5, 10, 11 default to 'add' with 'zero' tax effect
+ */
+export function buildDefaultVat3ARulesConfig(): Vat3ARulesConfig {
+  return {
+    defaultRatePercent: 15,
+    lineRules: {
+      1: { adjustmentDirection: 'subtract', taxMethod: 'rate', customRatePercent: null },
+      2: { adjustmentDirection: 'add', taxMethod: 'zero', customRatePercent: null },
+      3: { adjustmentDirection: 'add', taxMethod: 'zero', customRatePercent: null },
+      4: { adjustmentDirection: 'add', taxMethod: 'zero', customRatePercent: null },
+      5: { adjustmentDirection: 'add', taxMethod: 'zero', customRatePercent: null },
+      7: { adjustmentDirection: 'add', taxMethod: 'rate', customRatePercent: null },
+      8: { adjustmentDirection: 'add', taxMethod: 'rate', customRatePercent: null },
+      10: { adjustmentDirection: 'add', taxMethod: 'zero', customRatePercent: null },
+      11: { adjustmentDirection: 'add', taxMethod: 'zero', customRatePercent: null },
+    },
+  };
+}
+
+/**
+ * Legacy rules snapshot for migrating previously saved drafts so their stored numbers stay identical.
+ */
+export function buildLegacyVat3ARulesSnapshot(): Vat3ARulesConfig {
+  const cfg = buildDefaultVat3ARulesConfig();
+  cfg.lineRules[1] = { adjustmentDirection: 'add', taxMethod: 'rate', customRatePercent: null };
+  return cfg;
+}
+
+export function getEffectiveLineRule(
+  rules: Vat3ARulesConfig,
+  lineId: Vat3ALineId
+): {
+  adjustmentDirection: Vat3AAdjustmentDirection;
+  taxMethod: Vat3ATaxMethod;
+  effectiveRatePercent: number;
+} {
+  if (lineId === 9) {
+    return {
+      adjustmentDirection: 'add',
+      taxMethod: 'rate',
+      effectiveRatePercent: rules.defaultRatePercent,
+    };
+  }
+  const fallback = buildDefaultVat3ARulesConfig().lineRules[lineId] || {
+    adjustmentDirection: 'add',
+    taxMethod: 'zero',
+    customRatePercent: null,
+  };
+  const r: Vat3ALineRuleConfig = rules.lineRules[lineId] || fallback;
+  const effectiveRatePercent =
+    r.taxMethod === 'zero'
+      ? 0
+      : r.customRatePercent !== null && !Number.isNaN(r.customRatePercent)
+      ? r.customRatePercent
+      : rules.defaultRatePercent;
+
+  return {
+    adjustmentDirection: r.adjustmentDirection,
+    taxMethod: r.taxMethod,
+    effectiveRatePercent,
+  };
+}
+
 const ARABIC_INDIC_MAP: Record<string, string> = {
   '٠': '0',
   '١': '1',
@@ -206,18 +283,12 @@ export interface ParsedAmountResult {
   error?: string;
 }
 
-/**
- * Parses Arabic and Latin numerals with strict thousands grouping & max 2 decimal places.
- * Empty optional field -> isEmpty: true, isValid: true, halalas: 0.
- * Invalid text -> isValid: false with Arabic error message.
- */
 export function parseAmountToHalalas(raw: string, allowNegative: boolean): ParsedAmountResult {
   const trimmed = raw.trim();
   if (trimmed === '') {
     return { isEmpty: true, isValid: true, halalas: 0 };
   }
 
-  // Normalize Arabic-Indic digits, Arabic decimal separator (٫), Arabic thousands (٬), minus signs
   let normalized = '';
   for (const ch of trimmed) {
     if (ARABIC_INDIC_MAP[ch] !== undefined) {
@@ -233,10 +304,8 @@ export function parseAmountToHalalas(raw: string, allowNegative: boolean): Parse
     }
   }
 
-  // Strip spaces around leading sign
   normalized = normalized.replace(/\s+/g, '');
 
-  // Extract optional leading sign
   let sign = 1;
   if (normalized.startsWith('-')) {
     if (!allowNegative) {
@@ -262,7 +331,6 @@ export function parseAmountToHalalas(raw: string, allowNegative: boolean): Parse
     };
   }
 
-  // Reject any characters outside digits, commas, dots
   if (!/^[0-9.,]+$/.test(normalized)) {
     return {
       isEmpty: false,
@@ -272,7 +340,6 @@ export function parseAmountToHalalas(raw: string, allowNegative: boolean): Parse
     };
   }
 
-  // Reject multiple decimal points
   const dotParts = normalized.split('.');
   if (dotParts.length > 2) {
     return {
@@ -295,7 +362,6 @@ export function parseAmountToHalalas(raw: string, allowNegative: boolean): Parse
     };
   }
 
-  // Decimal part must not contain commas
   if (decPartRaw.includes(',')) {
     return {
       isEmpty: false,
@@ -305,7 +371,6 @@ export function parseAmountToHalalas(raw: string, allowNegative: boolean): Parse
     };
   }
 
-  // Validate thousands grouping if commas are present
   if (intPartRaw.includes(',')) {
     const validGrouped = /^\d{1,3}(,\d{3})+$/.test(intPartRaw);
     if (!validGrouped) {
@@ -348,12 +413,14 @@ export function parseAmountToHalalas(raw: string, allowNegative: boolean): Parse
 }
 
 /**
- * R(x * 0.15) where x is in halalas, rounded to nearest integer halala, half away from zero.
+ * R(baseHalalas * (ratePercent / 100)) rounded to nearest integer halala, half away from zero.
  */
-export function calculate15PercentVatHalalas(baseHalalas: number): number {
-  if (baseHalalas === 0) return 0;
-  const scaled = Math.abs(baseHalalas) * 15;
-  const rounded = Math.floor((scaled + 50) / 100);
+export function calculateRateVatHalalas(baseHalalas: number, ratePercent: number): number {
+  if (baseHalalas === 0 || ratePercent === 0) return 0;
+  // Use basis points (ratePercent * 100) to keep integer precision for decimal rates like 5.5%
+  const rateBasisPoints = Math.round(ratePercent * 100);
+  const scaled = Math.abs(baseHalalas) * rateBasisPoints;
+  const rounded = Math.floor((scaled + 5000) / 10000);
   return baseHalalas < 0 ? -rounded : rounded;
 }
 
@@ -369,7 +436,11 @@ export interface Vat3AComputedLine {
   definition: Vat3ALineDefinition;
   amountHalalas: number;
   adjustmentHalalas: number;
+  netBaseHalalas: number;
   vatHalalas: number;
+  adjustmentDirection: Vat3AAdjustmentDirection;
+  taxMethod: Vat3ATaxMethod;
+  effectiveRatePercent: number;
   amountError?: string;
   adjustmentError?: string;
   vatInputError?: string;
@@ -382,6 +453,7 @@ export interface Vat3AEvaluationResult {
   needsNegativeBaseExplanation: boolean;
   needsItem14Details: boolean;
   item14ThresholdWarning: boolean;
+  appliedRules: Vat3ARulesConfig;
   lines: Record<Vat3ALineId, Vat3AComputedLine>;
   v6Halalas: number;
   v12Halalas: number;
@@ -401,7 +473,13 @@ export function createEmptyVat3ALines(): Record<number, Vat3ALineInput> {
   return out;
 }
 
-export function evaluateVat3ADraft(draft: Vat3ADraft): Vat3AEvaluationResult {
+export function evaluateVat3ADraft(
+  draft: Vat3ADraft,
+  fallbackRules?: Vat3ARulesConfig
+): Vat3AEvaluationResult {
+  const appliedRules: Vat3ARulesConfig =
+    draft.rulesSnapshot || fallbackRules || buildLegacyVat3ARulesSnapshot();
+
   const errorsSummary: string[] = [];
   let periodError: string | undefined;
 
@@ -419,18 +497,21 @@ export function evaluateVat3ADraft(draft: Vat3ADraft): Vat3AEvaluationResult {
   const parsedMap: Partial<Record<Vat3ALineId, Vat3AComputedLine>> = {};
   let hasAnyNegativeNetBase = false;
 
-  // First pass: parse input lines 1-5, 7-11, 14, 15
   for (const def of VAT_3A_LINE_DEFINITIONS) {
     const raw = draft.lines[def.id] || { amountRaw: '', adjustmentRaw: '' };
+    const effRule = getEffectiveLineRule(appliedRules, def.id);
 
     if (def.vatDirectInput) {
-      // Summary inputs (14, 15) store signed/non-negative tax in amountRaw
       const parsedVat = parseAmountToHalalas(raw.amountRaw, !!def.allowNegativeAmount);
       const line: Vat3AComputedLine = {
         definition: def,
         amountHalalas: 0,
         adjustmentHalalas: 0,
+        netBaseHalalas: 0,
         vatHalalas: parsedVat.isValid ? parsedVat.halalas : 0,
+        adjustmentDirection: 'add',
+        taxMethod: 'rate',
+        effectiveRatePercent: appliedRules.defaultRatePercent,
         vatInputError: parsedVat.error,
       };
       if (!parsedVat.isValid && parsedVat.error) {
@@ -445,7 +526,11 @@ export function evaluateVat3ADraft(draft: Vat3ADraft): Vat3AEvaluationResult {
         definition: def,
         amountHalalas: 0,
         adjustmentHalalas: 0,
+        netBaseHalalas: 0,
         vatHalalas: 0,
+        adjustmentDirection: 'add',
+        taxMethod: 'rate',
+        effectiveRatePercent: appliedRules.defaultRatePercent,
       };
       continue;
     }
@@ -463,21 +548,29 @@ export function evaluateVat3ADraft(draft: Vat3ADraft): Vat3AEvaluationResult {
     const aHal = parsedA.isValid ? parsedA.halalas : 0;
     const dHal = parsedD.isValid ? parsedD.halalas : 0;
 
+    let netBase = 0;
     let vatHalalas = 0;
 
     if (def.id === 9) {
-      // Reverse charge: 0 <= D9 <= A9
+      // Special Reverse Charge treatment from VAT 3A Doc
+      netBase = aHal - dHal;
       if (parsedA.isValid && parsedD.isValid && dHal > aHal) {
-        adjustmentError = 'في الاحتساب العكسي يجب ألا يتجاوز التعديل (الجزء غير القابل للخصم) مبلغ البند.';
+        adjustmentError =
+          'في الاحتساب العكسي يجب ألا يتجاوز التعديل (الجزء غير القابل للخصم) مبلغ البند.';
         errorsSummary.push(`البند 9: ${adjustmentError}`);
       } else if (parsedA.isValid && parsedD.isValid) {
-        vatHalalas = -calculate15PercentVatHalalas(dHal);
+        vatHalalas = -calculateRateVatHalalas(dHal, appliedRules.defaultRatePercent);
         if (dHal > 0) {
           warning = 'خصم جزئي في الاحتساب العكسي: يُراجَع حق الخصم قبل الاعتماد.';
         }
       }
-    } else if (def.id === 1 || def.id === 7 || def.id === 8) {
-      const netBase = aHal + dHal;
+    } else {
+      // Apply adjustment direction ONCE so subtraction never flips into addition due to sign
+      netBase =
+        effRule.adjustmentDirection === 'subtract'
+          ? aHal - Math.abs(dHal)
+          : aHal + dHal;
+
       if (netBase < 0) {
         hasAnyNegativeNetBase = true;
         warning = 'الوعاء الصافي سالب؛ يلزم توضيح ومراجعة بشرية.';
@@ -487,28 +580,30 @@ export function evaluateVat3ADraft(draft: Vat3ADraft): Vat3AEvaluationResult {
           ? `${warning} راجع مستندات الجمارك وما يجوز خصمه.`
           : 'تُراجع مستندات الجمارك وما يجوز خصمه.';
       }
-      vatHalalas = calculate15PercentVatHalalas(netBase);
-    } else {
-      // Bands 2, 3, 4, 5, 10, 11 -> V = 0.00
-      if (aHal + dHal < 0) {
-        hasAnyNegativeNetBase = true;
-        warning = 'الوعاء الصافي سالب؛ يلزم توضيح ومراجعة بشرية.';
+
+      if (effRule.taxMethod === 'zero' || effRule.effectiveRatePercent === 0) {
+        vatHalalas = 0;
+      } else {
+        vatHalalas = calculateRateVatHalalas(netBase, effRule.effectiveRatePercent);
       }
-      vatHalalas = 0;
     }
 
     parsedMap[def.id] = {
       definition: def,
       amountHalalas: aHal,
       adjustmentHalalas: dHal,
+      netBaseHalalas: netBase,
       vatHalalas,
+      adjustmentDirection: effRule.adjustmentDirection,
+      taxMethod: effRule.taxMethod,
+      effectiveRatePercent: effRule.effectiveRatePercent,
       amountError,
       adjustmentError,
       warning,
     };
   }
 
-  // Compute Band 6 = sum(1..5)
+  // Band 6 = sum(1..5)
   let a6 = 0;
   let d6 = 0;
   let v6 = 0;
@@ -522,10 +617,14 @@ export function evaluateVat3ADraft(draft: Vat3ADraft): Vat3AEvaluationResult {
     definition: VAT_3A_LINE_DEFINITIONS[5],
     amountHalalas: a6,
     adjustmentHalalas: d6,
+    netBaseHalalas: a6,
     vatHalalas: v6,
+    adjustmentDirection: 'add',
+    taxMethod: 'rate',
+    effectiveRatePercent: appliedRules.defaultRatePercent,
   };
 
-  // Compute Band 12 = sum(7..11)
+  // Band 12 = sum(7..11)
   let a12 = 0;
   let d12 = 0;
   let v12 = 0;
@@ -539,7 +638,11 @@ export function evaluateVat3ADraft(draft: Vat3ADraft): Vat3AEvaluationResult {
     definition: VAT_3A_LINE_DEFINITIONS[11],
     amountHalalas: a12,
     adjustmentHalalas: d12,
+    netBaseHalalas: a12,
     vatHalalas: v12,
+    adjustmentDirection: 'add',
+    taxMethod: 'rate',
+    effectiveRatePercent: appliedRules.defaultRatePercent,
   };
 
   // Band 13: V13 = V6 - V12
@@ -548,7 +651,11 @@ export function evaluateVat3ADraft(draft: Vat3ADraft): Vat3AEvaluationResult {
     definition: VAT_3A_LINE_DEFINITIONS[12],
     amountHalalas: 0,
     adjustmentHalalas: 0,
+    netBaseHalalas: 0,
     vatHalalas: v13,
+    adjustmentDirection: 'add',
+    taxMethod: 'rate',
+    effectiveRatePercent: appliedRules.defaultRatePercent,
   };
 
   const c14 = parsedMap[14]!.vatHalalas;
@@ -564,13 +671,16 @@ export function evaluateVat3ADraft(draft: Vat3ADraft): Vat3AEvaluationResult {
     errorsSummary.push('يوجد وعاء صافٍ سالب في أحد البنود؛ أضف توضيحًا للمراجعة البشرية.');
   }
 
-  // Band 16: V16 = V13 + C14 - B15
   const v16 = v13 + c14 - b15;
   parsedMap[16] = {
     definition: VAT_3A_LINE_DEFINITIONS[15],
     amountHalalas: 0,
     adjustmentHalalas: 0,
+    netBaseHalalas: 0,
     vatHalalas: v16,
+    adjustmentDirection: 'add',
+    taxMethod: 'rate',
+    effectiveRatePercent: appliedRules.defaultRatePercent,
   };
 
   const netStatusLabel =
@@ -582,6 +692,7 @@ export function evaluateVat3ADraft(draft: Vat3ADraft): Vat3AEvaluationResult {
     needsNegativeBaseExplanation: hasAnyNegativeNetBase,
     needsItem14Details,
     item14ThresholdWarning,
+    appliedRules,
     lines: parsedMap as Record<Vat3ALineId, Vat3AComputedLine>,
     v6Halalas: v6,
     v12Halalas: v12,
@@ -603,9 +714,26 @@ export interface Vat3ATestPreset {
 
 export const VAT_3A_TEST_PRESETS: Vat3ATestPreset[] = [
   {
+    key: 'subtract-135',
+    title: 'البند 1 بالطرح الافتراضي (1,000 − 100 = 135.00)',
+    expectedSummary: 'مبيعات 1,000 − تعديل 100 = وعاء 900 · ضريبة 135.00 عند 15%',
+    buildDraftFields: () => {
+      const lines = createEmptyVat3ALines();
+      lines[1] = { amountRaw: '1000', adjustmentRaw: '100' };
+      return {
+        entityName: 'مسودة اختبار — البند 1 بالطرح (135.00)',
+        lines,
+        rulesSnapshot: buildDefaultVat3ARulesConfig(),
+        item14PeriodRef: '',
+        item14Reason: '',
+        negativeBaseExplanation: '',
+      };
+    },
+  },
+  {
     key: 'basic-95',
-    title: 'الحالة الأساسية (صافي 95.00 ريال)',
-    expectedSummary: 'مبيعات 165.00 · مشتريات 60.00 · الفترة 105.00 · الصافي 95.00 مستحقة',
+    title: 'الحالة المرجعية بالجمع (صافي 95.00 ريال)',
+    expectedSummary: 'مبيعات 1,000 + تعديل 100 = 165.00 · مشتريات 60.00 · الصافي 95.00',
     buildDraftFields: () => {
       const lines = createEmptyVat3ALines();
       lines[1] = { amountRaw: '1000', adjustmentRaw: '100' };
@@ -613,8 +741,9 @@ export const VAT_3A_TEST_PRESETS: Vat3ATestPreset[] = [
       lines[14] = { amountRaw: '10', adjustmentRaw: '' };
       lines[15] = { amountRaw: '20', adjustmentRaw: '' };
       return {
-        entityName: 'مسودة اختبار — الحالة الأساسية 95.00',
+        entityName: 'مسودة اختبار — الحالة الأساسية بالجمع 95.00',
         lines,
+        rulesSnapshot: buildLegacyVat3ARulesSnapshot(),
         item14PeriodRef: 'الربع الثاني 2026',
         item14Reason: 'فحص مطابقة الحالة الأساسية المرجعية',
         negativeBaseExplanation: '',
@@ -624,13 +753,14 @@ export const VAT_3A_TEST_PRESETS: Vat3ATestPreset[] = [
   {
     key: 'reverse-partial',
     title: 'البند 9: خصم جزئي (صافي 300.00 ريال)',
-    expectedSummary: 'مبلغ 10,000 · غير قابل للخصم 2,000 · أثر البند -300.00 · الصافي 300.00 مستحقة',
+    expectedSummary: 'مبلغ 10,000 · غير قابل للخصم 2,000 · أثر -300.00 · الصافي 300.00',
     buildDraftFields: () => {
       const lines = createEmptyVat3ALines();
       lines[9] = { amountRaw: '10000', adjustmentRaw: '2000' };
       return {
         entityName: 'مسودة اختبار — البند 9 خصم جزئي',
         lines,
+        rulesSnapshot: buildDefaultVat3ARulesConfig(),
         item14PeriodRef: '',
         item14Reason: '',
         negativeBaseExplanation: '',
@@ -647,6 +777,7 @@ export const VAT_3A_TEST_PRESETS: Vat3ATestPreset[] = [
       return {
         entityName: 'مسودة اختبار — البند 9 خصم كامل',
         lines,
+        rulesSnapshot: buildDefaultVat3ARulesConfig(),
         item14PeriodRef: '',
         item14Reason: '',
         negativeBaseExplanation: '',
@@ -664,6 +795,7 @@ export const VAT_3A_TEST_PRESETS: Vat3ATestPreset[] = [
       return {
         entityName: 'مسودة اختبار — رصيد دائن',
         lines,
+        rulesSnapshot: buildDefaultVat3ARulesConfig(),
         item14PeriodRef: '',
         item14Reason: '',
         negativeBaseExplanation: '',
@@ -671,33 +803,16 @@ export const VAT_3A_TEST_PRESETS: Vat3ATestPreset[] = [
     },
   },
   {
-    key: 'sign-reversal',
-    title: 'عكس الإشارة (صافي 30.00 ريال)',
-    expectedSummary: 'ضريبة المبيعات والفترة 60.00 · تصحيح -10 · مرحّل 20 · الصافي 30.00',
-    buildDraftFields: () => {
-      const lines = createEmptyVat3ALines();
-      lines[1] = { amountRaw: '500', adjustmentRaw: '-100' };
-      lines[14] = { amountRaw: '-10', adjustmentRaw: '' };
-      lines[15] = { amountRaw: '20', adjustmentRaw: '' };
-      return {
-        entityName: 'مسودة اختبار — عكس الإشارة',
-        lines,
-        item14PeriodRef: 'الربع الأول 2026',
-        item14Reason: 'تسوية إشعار دائن لعميل',
-        negativeBaseExplanation: '',
-      };
-    },
-  },
-  {
     key: 'arabic-rounding',
     title: 'أرقام عربية وتقريب (١٬٠٠٠٫١٠ ← 150.02)',
-    expectedSummary: 'يُقرأ المبلغ 1,000.10 وتُحتسب الضريبة 150.02 وفق سياسة النصف بعيدًا عن الصفر',
+    expectedSummary: 'يُقرأ المبلغ 1,000.10 وتُحتسب الضريبة 150.02',
     buildDraftFields: () => {
       const lines = createEmptyVat3ALines();
       lines[1] = { amountRaw: '١٬٠٠٠٫١٠', adjustmentRaw: '' };
       return {
         entityName: 'مسودة اختبار — أرقام عربية وتقريب',
         lines,
+        rulesSnapshot: buildDefaultVat3ARulesConfig(),
         item14PeriodRef: '',
         item14Reason: '',
         negativeBaseExplanation: '',
@@ -715,6 +830,7 @@ export const VAT_3A_TEST_PRESETS: Vat3ATestPreset[] = [
       return {
         entityName: 'مسودة اختبار — تحقق الإدخال غير الصالح',
         lines,
+        rulesSnapshot: buildDefaultVat3ARulesConfig(),
         item14PeriodRef: '',
         item14Reason: '',
         negativeBaseExplanation: '',

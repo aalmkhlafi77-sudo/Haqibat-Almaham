@@ -389,10 +389,16 @@ export const RecordDrawer: React.FC = () => {
   const confirmDelete = () => {
     if (!activeRecord.id) return;
     const id = activeRecord.id;
+    if (activeRecord.type === 'document') {
+      const ok = deleteDocument(id);
+      if (!ok) return;
+      setDeleteConfirmOpen(false);
+      closeRecord();
+      return;
+    }
     setDeleteConfirmOpen(false);
     closeRecord();
     if (activeRecord.type === 'task') deleteTask(id);
-    else if (activeRecord.type === 'document') deleteDocument(id);
     else if (activeRecord.type === 'case') deleteCase(id);
     else if (activeRecord.type === 'session') deleteSession(id);
     else if (activeRecord.type === 'poa') deletePoa(id);
@@ -462,17 +468,17 @@ export const RecordDrawer: React.FC = () => {
     : null;
 
   const inputClass =
-    'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500';
+    'w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-sm font-mono-tabular text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500';
   const labelClass = 'block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1';
 
   return (
     <div
-      className="fixed inset-0 z-40 flex justify-end bg-slate-950/55 backdrop-blur-sm"
+      className="fixed inset-0 z-40 flex justify-end bg-black/60 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
     >
       {/* Full page on mobile, side slide-over on desktop */}
-      <div className="w-full lg:w-[620px] xl:w-[680px] h-full bg-white dark:bg-[#09152b] border-r border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col">
+      <div className="w-full lg:w-[620px] xl:w-[680px] h-full bg-white dark:bg-[#0c0d11] border-r border-slate-200 dark:border-white/10 shadow-2xl flex flex-col">
         {/* Header */}
         <div className="px-4 lg:px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 shrink-0">
           <div className="min-w-0">
@@ -654,6 +660,8 @@ export const RecordDrawer: React.FC = () => {
                   <label className={labelClass}>الموعد المستهدف *</label>
                   <input
                     type="date"
+                    lang="en"
+                    dir="ltr"
                     value={taskForm.dueDate || ''}
                     onChange={(e) => {
                       setTaskForm({ ...taskForm, dueDate: e.target.value });
@@ -667,6 +675,8 @@ export const RecordDrawer: React.FC = () => {
                   <label className={labelClass}>تاريخ التسليم الفعلي</label>
                   <input
                     type="date"
+                    lang="en"
+                    dir="ltr"
                     value={taskForm.actualDeliveryDate || ''}
                     onChange={(e) => {
                       setTaskForm({ ...taskForm, actualDeliveryDate: e.target.value });
@@ -707,6 +717,8 @@ export const RecordDrawer: React.FC = () => {
                     <label className={labelClass}>تاريخ الاستلام</label>
                     <input
                       type="date"
+                    lang="en"
+                    dir="ltr"
                       value={taskForm.receivedDate || ''}
                       onChange={(e) => {
                         setTaskForm({ ...taskForm, receivedDate: e.target.value });
@@ -868,6 +880,8 @@ export const RecordDrawer: React.FC = () => {
                       <label className={labelClass}>تاريخ الانتهاء الجديد *</label>
                       <input
                         type="date"
+                    lang="en"
+                    dir="ltr"
                         value={renewalNewDate}
                         onChange={(e) => {
                           setRenewalNewDate(e.target.value);
@@ -986,6 +1000,8 @@ export const RecordDrawer: React.FC = () => {
                   <label className={labelClass}>تاريخ الإصدار</label>
                   <input
                     type="date"
+                    lang="en"
+                    dir="ltr"
                     value={docForm.issueDate || ''}
                     onChange={(e) => {
                       setDocForm({ ...docForm, issueDate: e.target.value });
@@ -998,6 +1014,8 @@ export const RecordDrawer: React.FC = () => {
                   <label className={labelClass}>تاريخ الانتهاء</label>
                   <input
                     type="date"
+                    lang="en"
+                    dir="ltr"
                     disabled={!!docForm.noExpiry}
                     value={docForm.noExpiry ? '' : docForm.expiryDate || ''}
                     onChange={(e) => {
@@ -1302,6 +1320,8 @@ export const RecordDrawer: React.FC = () => {
                   <label className={labelClass}>الموعد والوقت *</label>
                   <input
                     type="datetime-local"
+                    lang="en"
+                    dir="ltr"
                     value={sessionForm.scheduledAt || ''}
                     onChange={(e) => {
                       setSessionForm({ ...sessionForm, scheduledAt: e.target.value });
@@ -1481,6 +1501,8 @@ export const RecordDrawer: React.FC = () => {
                   <label className={labelClass}>تاريخ الإصدار</label>
                   <input
                     type="date"
+                    lang="en"
+                    dir="ltr"
                     value={poaForm.issueDate || ''}
                     onChange={(e) => {
                       setPoaForm({ ...poaForm, issueDate: e.target.value });
@@ -1493,6 +1515,8 @@ export const RecordDrawer: React.FC = () => {
                   <label className={labelClass}>تاريخ الانتهاء</label>
                   <input
                     type="date"
+                    lang="en"
+                    dir="ltr"
                     disabled={!!poaForm.noExpiry}
                     value={poaForm.noExpiry ? '' : poaForm.expiryDate || ''}
                     onChange={(e) => {
@@ -1601,6 +1625,8 @@ export const RecordDrawer: React.FC = () => {
                   <label className={labelClass}>التاريخ والوقت *</label>
                   <input
                     type="datetime-local"
+                    lang="en"
+                    dir="ltr"
                     value={calForm.scheduledAt || ''}
                     onChange={(e) => {
                       setCalForm({ ...calForm, scheduledAt: e.target.value });
@@ -1710,7 +1736,7 @@ export const RecordDrawer: React.FC = () => {
         </form>
 
         {/* Footer Actions */}
-        <div className="px-4 lg:px-6 py-3.5 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 shrink-0 bg-slate-50/70 dark:bg-[#071022]/80">
+        <div className="px-4 lg:px-6 py-3.5 border-t border-slate-200 dark:border-white/10 flex flex-wrap items-center justify-between gap-2 shrink-0 bg-slate-50/70 dark:bg-[#0a0b0f]/90">
           <div className="flex items-center gap-2">
             {activeRecord.id && (
               <button
@@ -1858,44 +1884,88 @@ export const RecordDrawer: React.FC = () => {
         </div>
       )}
 
-      {/* Delete Confirmation with Linked Impact */}
+      {/* Delete Confirmation with Linked Impact & MySQL-aligned Restriction */}
       {deleteConfirmOpen && deleteImpact && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
           <div className="glass-panel max-w-md w-full rounded-2xl p-5 space-y-4 shadow-2xl">
             <h3 className="text-base font-bold text-rose-700 dark:text-rose-300">
-              تأكيد حذف السجل
+              {deleteImpact.blockedReason ? 'الحذف النهائي محظور' : 'تأكيد حذف السجل'}
             </h3>
-            <p className="text-sm text-slate-700 dark:text-slate-200">
-              هل أنت متأكد من حذف «<span className="font-bold">{deleteImpact.title}</span>»؟
-            </p>
-            {deleteImpact.impactLines.length > 0 && (
-              <div className="rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 p-3 space-y-1">
-                <div className="text-xs font-bold text-amber-800 dark:text-amber-200">
-                  أثر الحذف على السجلات المرتبطة:
+
+            {deleteImpact.blockedReason ? (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed">
+                  {deleteImpact.blockedReason}
+                </p>
+                {deleteImpact.impactLines.length > 0 && (
+                  <div className="rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 p-3 text-xs text-amber-800 dark:text-amber-200 space-y-1">
+                    {deleteImpact.impactLines.map((line, i) => (
+                      <div key={i}>{line}</div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirmOpen(false)}
+                    className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200"
+                  >
+                    إغلاق
+                  </button>
+                  {existingDoc && !existingDoc.archivedAt && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        saveDocument({
+                          ...existingDoc,
+                          archivedAt: new Date().toISOString().slice(0, 19),
+                        });
+                        setDeleteConfirmOpen(false);
+                        showToast('تمت أرشفة الوثيقة والاحتفاظ بسجل التجديدات.');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-teal-600 text-white hover:bg-teal-700 text-xs font-semibold"
+                    >
+                      <Archive className="w-3.5 h-3.5" />
+                      <span>أرشفة الوثيقة</span>
+                    </button>
+                  )}
                 </div>
-                <ul className="list-disc list-inside text-xs text-amber-800 dark:text-amber-200 space-y-0.5">
-                  {deleteImpact.impactLines.map((line, i) => (
-                    <li key={i}>{line}</li>
-                  ))}
-                </ul>
               </div>
+            ) : (
+              <>
+                <p className="text-sm text-slate-700 dark:text-slate-200">
+                  هل أنت متأكد من حذف «<span className="font-bold">{deleteImpact.title}</span>»؟
+                </p>
+                {deleteImpact.impactLines.length > 0 && (
+                  <div className="rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 p-3 space-y-1">
+                    <div className="text-xs font-bold text-amber-800 dark:text-amber-200">
+                      أثر الحذف على السجلات المرتبطة:
+                    </div>
+                    <ul className="list-disc list-inside text-xs text-amber-800 dark:text-amber-200 space-y-0.5">
+                      {deleteImpact.impactLines.map((line, i) => (
+                        <li key={i}>{line}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirmOpen(false)}
+                    className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200"
+                  >
+                    تراجع
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmDelete}
+                    className="px-3.5 py-2 rounded-xl bg-rose-600 text-white hover:bg-rose-700 text-xs font-semibold"
+                  >
+                    تأكيد الحذف النهائي
+                  </button>
+                </div>
+              </>
             )}
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setDeleteConfirmOpen(false)}
-                className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-medium text-slate-700 dark:text-slate-200"
-              >
-                تراجع
-              </button>
-              <button
-                type="button"
-                onClick={confirmDelete}
-                className="px-3.5 py-2 rounded-xl bg-rose-600 text-white hover:bg-rose-700 text-xs font-semibold"
-              >
-                تأكيد الحذف النهائي
-              </button>
-            </div>
           </div>
         </div>
       )}

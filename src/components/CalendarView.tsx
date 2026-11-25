@@ -10,11 +10,17 @@ import { useApp } from '../context/AppContext';
 import {
   formatDateTime,
   formatDisplayDate,
-  formatHijriDate,
+  formatGregorianMonthHeader,
+  formatHijriDayNumber,
+  formatHijriMonthHeader,
+  formatTimeFromDateTime,
   getTodayISO,
+  toEnglishDigits,
 } from '../domain/dateUtils';
 import { RecordType } from '../types/domain';
 import { StatusBadge } from './StatusBadge';
+
+type HeatmapCategory = 'tasks' | 'sessions_events' | 'documents' | 'cases_poas';
 
 interface CalendarEntry {
   id: string;
@@ -24,9 +30,40 @@ interface CalendarEntry {
   recordType: RecordType;
   recordId: string;
   tone: 'info' | 'purple' | 'warning' | 'gold' | 'danger';
+  heatCategory: HeatmapCategory;
   timeText?: string;
   specialistId: string | null;
 }
+
+const HEATMAP_CATEGORY_META: Record<
+  HeatmapCategory,
+  { label: string; dotColor: string; glowColor: string; bgTint: string }
+> = {
+  tasks: {
+    label: 'مهام',
+    dotColor: '#3b82f6',
+    glowColor: 'rgba(59, 130, 246, 0.7)',
+    bgTint: 'rgba(59, 130, 246, 0.08)',
+  },
+  sessions_events: {
+    label: 'جلسات وأحداث',
+    dotColor: '#8b5cf6',
+    glowColor: 'rgba(139, 92, 246, 0.7)',
+    bgTint: 'rgba(139, 92, 246, 0.08)',
+  },
+  documents: {
+    label: 'وثائق وتراخيص',
+    dotColor: '#14b8a6',
+    glowColor: 'rgba(20, 184, 166, 0.7)',
+    bgTint: 'rgba(20, 184, 166, 0.08)',
+  },
+  cases_poas: {
+    label: 'وكالات وقضايا',
+    dotColor: '#f59e0b',
+    glowColor: 'rgba(245, 158, 11, 0.7)',
+    bgTint: 'rgba(245, 158, 11, 0.08)',
+  },
+};
 
 export const CalendarView: React.FC = () => {
   const { db, openRecord, openShareModal, setShowHijri } = useApp();
@@ -35,7 +72,7 @@ export const CalendarView: React.FC = () => {
 
   const [viewDate, setViewDate] = useState(() => {
     const [y, m] = today.split('-').map(Number);
-    return { year: y, month: m - 1 }; // 0-indexed month
+    return { year: y, month: m - 1 };
   });
   const [selectedDay, setSelectedDay] = useState<string>(today);
 
@@ -51,7 +88,8 @@ export const CalendarView: React.FC = () => {
         recordType: 'session',
         recordId: s.id,
         tone: 'purple',
-        timeText: s.scheduledAt.slice(11, 16),
+        heatCategory: 'sessions_events',
+        timeText: formatTimeFromDateTime(s.scheduledAt),
         specialistId: s.specialistId,
       });
     }
@@ -66,6 +104,7 @@ export const CalendarView: React.FC = () => {
         recordType: 'task',
         recordId: t.id,
         tone: 'info',
+        heatCategory: 'tasks',
         specialistId: t.specialistId,
       });
     }
@@ -80,6 +119,7 @@ export const CalendarView: React.FC = () => {
         recordType: 'document',
         recordId: d.id,
         tone: d.expiryDate < today ? 'danger' : 'warning',
+        heatCategory: 'documents',
         specialistId: d.specialistId,
       });
     }
@@ -94,6 +134,7 @@ export const CalendarView: React.FC = () => {
         recordType: 'poa',
         recordId: p.id,
         tone: 'gold',
+        heatCategory: 'cases_poas',
         specialistId: p.specialistId,
       });
     }
@@ -107,7 +148,8 @@ export const CalendarView: React.FC = () => {
         recordType: 'calendar_item',
         recordId: ci.id,
         tone: 'purple',
-        timeText: ci.isAllDay ? undefined : ci.scheduledAt.slice(11, 16),
+        heatCategory: 'sessions_events',
+        timeText: ci.isAllDay ? undefined : formatTimeFromDateTime(ci.scheduledAt),
         specialistId: ci.specialistId,
       });
     }
@@ -115,14 +157,14 @@ export const CalendarView: React.FC = () => {
     return list;
   }, [db.sessions, db.tasks, db.documents, db.poas, db.calendarItems, today]);
 
-  const monthLabel = new Intl.DateTimeFormat('ar-SA-u-ca-gregory', {
-    month: 'long',
-    year: 'numeric',
-  }).format(new Date(viewDate.year, viewDate.month, 1));
+  const monthLabel = formatGregorianMonthHeader(viewDate.year, viewDate.month);
+  const hijriMonthLabel = showHijri
+    ? formatHijriMonthHeader(viewDate.year, viewDate.month)
+    : '';
 
   const daysInMonth = new Date(viewDate.year, viewDate.month + 1, 0).getDate();
-  const firstWeekday = new Date(viewDate.year, viewDate.month, 1).getDay(); // 0=Sun..6=Sat
-  // Align week starting Sunday (0)
+  const firstWeekday = new Date(viewDate.year, viewDate.month, 1).getDay();
+
   const cells: Array<{ day: number | null; iso: string | null }> = [];
   for (let i = 0; i < firstWeekday; i += 1) {
     cells.push({ day: null, iso: null });
@@ -160,15 +202,15 @@ export const CalendarView: React.FC = () => {
         <div>
           <h1 className="text-xl lg:text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <CalendarDays className="w-5 h-5 text-violet-600 dark:text-violet-400" />
-            <span>التقويم والأحداث والتذكيرات</span>
+            <span>التقويم الحراري والأحداث والتذكيرات</span>
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            عرض الجلسات والمهام والأحداث والتذكيرات واستحقاقات الوثائق والوكالات
+            توزيع بصري للمهام والجلسات والوثائق والوكالات بأرقام واضحة، مع النقر على أي يوم لعرض سجلاته
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 cursor-pointer">
+          <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 cursor-pointer">
             <input
               type="checkbox"
               checked={showHijri}
@@ -193,24 +235,31 @@ export const CalendarView: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
-        {/* Month Grid */}
+        {/* Heatmap Month Grid */}
         <div className="xl:col-span-7 glass-panel rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <button
               type="button"
               onClick={prevMonth}
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
+              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300"
               aria-label="الشهر السابق"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
-            <div className="text-sm font-bold text-slate-900 dark:text-white">
-              {monthLabel}
+            <div className="text-center">
+              <div className="text-sm font-bold text-slate-900 dark:text-white font-mono-tabular">
+                {monthLabel}
+              </div>
+              {hijriMonthLabel && (
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono-tabular mt-0.5">
+                  {hijriMonthLabel}
+                </div>
+              )}
             </div>
             <button
               type="button"
               onClick={nextMonth}
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
+              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300"
               aria-label="الشهر التالي"
             >
               <ChevronLeft className="w-4 h-4" />
@@ -225,115 +274,188 @@ export const CalendarView: React.FC = () => {
             ))}
           </div>
 
-          <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-7 gap-1.5">
             {cells.map((cell, idx) => {
               if (!cell.iso || !cell.day) {
-                return <div key={`empty-${idx}`} className="h-14 lg:h-16" />;
+                return <div key={`empty-${idx}`} className="h-16 lg:h-[72px]" />;
               }
               const items = entries.filter((e) => e.dateISO === cell.iso);
               const isSelected = selectedDay === cell.iso;
               const isToday = today === cell.iso;
-              const hijriDay = showHijri ? formatHijriDate(cell.iso).split(' ')[0] : '';
+              const hijriDay = showHijri ? formatHijriDayNumber(cell.iso) : '';
+
+              // Distinct semantic color dots per day
+              const uniqueCats = Array.from(new Set(items.map((x) => x.heatCategory)));
+              const primaryCat = uniqueCats[0];
+              const heatStyle =
+                items.length > 0 && !isSelected && primaryCat
+                  ? { backgroundColor: HEATMAP_CATEGORY_META[primaryCat].bgTint }
+                  : undefined;
 
               return (
                 <button
                   key={cell.iso}
                   type="button"
                   onClick={() => setSelectedDay(cell.iso!)}
-                  className={`h-14 lg:h-16 rounded-xl p-1.5 flex flex-col justify-between text-right border transition-colors ${
+                  style={heatStyle}
+                  aria-label={`يوم ${toEnglishDigits(String(cell.day))} — ${toEnglishDigits(
+                    String(items.length)
+                  )} سجلات`}
+                  className={`h-16 lg:h-[72px] rounded-xl p-1.5 flex flex-col justify-between text-right border transition-all ${
                     isSelected
-                      ? 'border-violet-600 bg-violet-50/80 dark:bg-violet-950/50 dark:border-violet-400'
+                      ? 'border-violet-600 bg-violet-50/90 dark:bg-violet-950/50 dark:border-violet-400 ring-1 ring-violet-500/40'
                       : isToday
-                      ? 'border-blue-400 bg-blue-50/50 dark:bg-blue-950/30 dark:border-blue-600'
-                      : 'border-slate-200/70 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                      ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/35 dark:border-blue-400'
+                      : 'border-slate-200/80 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5'
                   }`}
                 >
-                  <div className="flex items-center justify-between w-full">
-                    <span className="text-xs font-bold tabular-nums text-slate-900 dark:text-slate-100">
-                      {cell.day}
+                  <div className="flex items-center justify-between w-full gap-1">
+                    <span className="text-xs font-bold font-mono-tabular text-slate-900 dark:text-slate-100">
+                      {toEnglishDigits(String(cell.day))}
                     </span>
                     {hijriDay && (
-                      <span className="text-[10px] text-slate-400 tabular-nums">{hijriDay}</span>
+                      <span className="text-[10px] font-mono-tabular text-slate-500 dark:text-slate-400">
+                        {hijriDay}
+                      </span>
                     )}
                   </div>
+
                   {items.length > 0 && (
-                    <span className="text-[10px] font-semibold text-violet-700 dark:text-violet-300 truncate">
-                      {items.length} {items.length === 1 ? 'موعد' : 'مواعيد'}
-                    </span>
+                    <div className="flex items-center justify-between gap-1 w-full">
+                      <div className="flex items-center gap-1 min-w-0">
+                        {uniqueCats.slice(0, 3).map((cat) => {
+                          const meta = HEATMAP_CATEGORY_META[cat];
+                          return (
+                            <span
+                              key={cat}
+                              className="w-2.5 h-2.5 rounded-full heatmap-glow-dot shrink-0"
+                              style={{
+                                backgroundColor: meta.dotColor,
+                                boxShadow: `0 0 8px ${meta.glowColor}`,
+                              }}
+                              title={meta.label}
+                            />
+                          );
+                        })}
+                        {uniqueCats.length > 3 && (
+                          <span className="text-[9px] font-bold font-mono-tabular text-slate-500 dark:text-slate-300">
+                            +{toEnglishDigits(String(uniqueCats.length - 3))}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] font-bold font-mono-tabular px-1 rounded bg-slate-900/5 dark:bg-white/10 text-slate-700 dark:text-slate-200 shrink-0">
+                        {toEnglishDigits(String(items.length))}
+                      </span>
+                    </div>
                   )}
                 </button>
               );
             })}
+          </div>
+
+          {/* Heatmap Color Legend */}
+          <div className="pt-2 border-t border-slate-200/80 dark:border-white/10 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+            <span className="font-semibold text-slate-500 dark:text-slate-400">دلالة النقاط المضيئة:</span>
+            {Object.entries(HEATMAP_CATEGORY_META).map(([key, meta]) => (
+              <span key={key} className="inline-flex items-center gap-1.5">
+                <span
+                  className="w-2.5 h-2.5 rounded-full inline-block"
+                  style={{
+                    backgroundColor: meta.dotColor,
+                    boxShadow: `0 0 6px ${meta.glowColor}`,
+                  }}
+                />
+                <span>{meta.label}</span>
+              </span>
+            ))}
           </div>
         </div>
 
         {/* Selected Day + Upcoming Agenda */}
         <div className="xl:col-span-5 space-y-4">
           <div className="glass-panel rounded-xl p-4 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <h2 className="text-sm font-bold text-slate-900 dark:text-white">
-                مواعيد يوم {formatDisplayDate(selectedDay, showHijri)} ({dayEntries.length})
+                مواعيد يوم{' '}
+                <span className="font-mono-tabular">{formatDisplayDate(selectedDay, showHijri)}</span>{' '}
+                (<span className="font-mono-tabular">{toEnglishDigits(String(dayEntries.length))}</span>)
               </h2>
             </div>
+
             {dayEntries.length === 0 ? (
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                لا توجد مواعيد مسجلة في هذا اليوم.
+                لا توجد سجلات أو مواعيد مسجلة في هذا اليوم.
               </p>
             ) : (
               <div className="space-y-2">
-                {dayEntries.map((item) => (
-                  <div
-                    key={item.id}
-                    className="glass-surface-subtle rounded-xl p-3 flex items-start justify-between gap-2"
-                  >
-                    <div className="min-w-0">
-                      <button
-                        type="button"
-                        onClick={() => openRecord(item.recordType, item.recordId)}
-                        className="text-right text-sm font-semibold text-slate-900 dark:text-white hover:underline block"
-                      >
-                        {item.title}
-                      </button>
-                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        {item.kindLabel} {item.timeText ? `· ${item.timeText}` : ''}
+                {dayEntries.map((item) => {
+                  const dotMeta = HEATMAP_CATEGORY_META[item.heatCategory];
+                  return (
+                    <div
+                      key={item.id}
+                      className="glass-surface-subtle rounded-xl p-3 flex items-start justify-between gap-2"
+                    >
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full mt-1.5 shrink-0"
+                          style={{
+                            backgroundColor: dotMeta.dotColor,
+                            boxShadow: `0 0 6px ${dotMeta.glowColor}`,
+                          }}
+                        />
+                        <div className="min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => openRecord(item.recordType, item.recordId)}
+                            className="text-right text-sm font-semibold text-slate-900 dark:text-white hover:underline block"
+                          >
+                            {item.title}
+                          </button>
+                          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-mono-tabular">
+                            {item.kindLabel} {item.timeText ? `· ${item.timeText}` : ''}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <StatusBadge label={item.kindLabel} tone={item.tone} />
+                        {item.recordType === 'calendar_item' && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openShareModal({
+                                recordType: 'calendar_item',
+                                recordId: item.recordId,
+                                recordTitle: item.title,
+                                specialistId: item.specialistId,
+                                scheduledInfo: `${item.dateISO}${
+                                  item.timeText ? `T${item.timeText}` : ''
+                                }`,
+                                defaultMessage: `السلام عليكم، تذكير بـ (${item.kindLabel}):\n«${item.title}»\nالتاريخ: ${formatDateTime(
+                                  `${item.dateISO}${item.timeText ? `T${item.timeText}` : ''}`,
+                                  showHijri
+                                )}`,
+                              })
+                            }
+                            className="p-1.5 rounded-lg border border-slate-200 dark:border-white/15 text-slate-600 dark:text-slate-300"
+                            title="مشاركة مع المختص"
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <StatusBadge label={item.kindLabel} tone={item.tone} />
-                      {item.recordType === 'calendar_item' && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openShareModal({
-                              recordType: 'calendar_item',
-                              recordId: item.recordId,
-                              recordTitle: item.title,
-                              specialistId: item.specialistId,
-                              scheduledInfo: `${item.dateISO}${item.timeText ? `T${item.timeText}` : ''}`,
-                              defaultMessage: `السلام عليكم، تذكير بـ (${item.kindLabel}):\n«${item.title}»\nالتاريخ: ${formatDateTime(
-                                `${item.dateISO}${item.timeText ? `T${item.timeText}` : ''}`,
-                                showHijri
-                              )}`,
-                            })
-                          }
-                          className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
-                          title="مشاركة مع المختص"
-                        >
-                          <Share2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
 
           <div className="glass-panel rounded-xl p-4 space-y-2.5">
             <h2 className="text-sm font-bold text-slate-900 dark:text-white">
-              أقرب المواعيد القادمة ({upcomingEntries.length})
+              أقرب المواعيد القادمة (
+              <span className="font-mono-tabular">{toEnglishDigits(String(upcomingEntries.length))}</span>)
             </h2>
-            <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
+            <div className="divide-y divide-slate-100 dark:divide-white/10">
               {upcomingEntries.map((item) => (
                 <button
                   key={`up-${item.id}`}
@@ -341,10 +463,14 @@ export const CalendarView: React.FC = () => {
                   onClick={() => openRecord(item.recordType, item.recordId)}
                   className="w-full text-right py-2 first:pt-0 last:pb-0 flex items-center justify-between gap-2 hover:opacity-80"
                 >
-                  <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
-                    {item.title}
+                  <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate flex items-center gap-2">
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: HEATMAP_CATEGORY_META[item.heatCategory].dotColor }}
+                    />
+                    <span className="truncate">{item.title}</span>
                   </span>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400 shrink-0">
+                  <span className="text-[11px] font-mono-tabular text-slate-500 dark:text-slate-400 shrink-0">
                     {formatDisplayDate(item.dateISO, showHijri)}
                   </span>
                 </button>

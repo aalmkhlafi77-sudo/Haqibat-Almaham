@@ -1,4 +1,8 @@
 import {
+  buildLegacyVat3ARulesSnapshot,
+  evaluateVat3ADraft,
+} from '../domain/vat3aEngine';
+import {
   AppDatabaseState,
   AppPreferences,
   CalendarItem,
@@ -24,6 +28,12 @@ export function generateId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+export interface DeleteOperationResult {
+  ok: boolean;
+  error?: string;
+  state: AppDatabaseState;
+}
+
 export interface DataRepository {
   load(): AppDatabaseState;
   save(state: AppDatabaseState): void;
@@ -36,7 +46,7 @@ export interface DataRepository {
     documentId: string,
     renewal: Omit<DocumentRenewal, 'id' | 'documentId'>
   ): AppDatabaseState;
-  deleteDocument(documentId: string): AppDatabaseState;
+  deleteDocument(documentId: string): DeleteOperationResult;
   upsertCase(c: CaseItem): AppDatabaseState;
   deleteCase(caseId: string): AppDatabaseState;
   upsertSession(s: SessionItem): AppDatabaseState;
@@ -67,7 +77,22 @@ class LocalStorageDataAdapter implements DataRepository {
       const parsed = JSON.parse(raw) as Partial<AppDatabaseState>;
       const fallback = createSeedDatabase();
       const defaultPrefs = buildDefaultPreferences();
-      return {
+
+      // Migrate old VAT 3A drafts that lacked rulesSnapshot -> attach legacy snapshot so saved totals stay preserved
+      const migratedVatDrafts: Vat3ADraft[] = (
+        parsed.vat3aDrafts ?? fallback.vat3aDrafts
+      ).map((d) => {
+        if (d.rulesSnapshot) return d;
+        const legacy = buildLegacyVat3ARulesSnapshot();
+        const migrated: Vat3ADraft = {
+          ...d,
+          rulesSnapshot: legacy,
+        };
+        migrated.computedNetHalalas = evaluateVat3ADraft(migrated).v16Halalas;
+        return migrated;
+      });
+
+      const migrated: AppDatabaseState = {
         organizations: parsed.organizations ?? fallback.organizations,
         specialists: parsed.specialists ?? fallback.specialists,
         tasks: parsed.tasks ?? fallback.tasks,
@@ -78,10 +103,22 @@ class LocalStorageDataAdapter implements DataRepository {
         calendarItems: parsed.calendarItems ?? fallback.calendarItems,
         labels: parsed.labels ?? fallback.labels,
         shareLogs: parsed.shareLogs ?? fallback.shareLogs,
-        vat3aDrafts: parsed.vat3aDrafts ?? fallback.vat3aDrafts,
+        vat3aDrafts: migratedVatDrafts,
         preferences: {
           ...defaultPrefs,
           ...(parsed.preferences || {}),
+          vat3aRules: {
+            ...defaultPrefs.vat3aRules,
+            ...(parsed.preferences?.vat3aRules || {}),
+            lineRules: {
+              ...defaultPrefs.vat3aRules.lineRules,
+              ...(parsed.preferences?.vat3aRules?.lineRules || {}),
+            },
+          },
+          integrations: {
+            ...defaultPrefs.integrations,
+            ...(parsed.preferences?.integrations || {}),
+          },
           taskFilters: {
             ...defaultPrefs.taskFilters,
             ...(parsed.preferences?.taskFilters || {}),
@@ -98,6 +135,8 @@ class LocalStorageDataAdapter implements DataRepository {
           navGroupCollapsed: parsed.preferences?.navGroupCollapsed ?? {},
         },
       };
+
+      return migrated;
     } catch {
       const seeded = createSeedDatabase();
       this.save(seeded);
@@ -198,8 +237,21 @@ class LocalStorageDataAdapter implements DataRepository {
     return next;
   }
 
-  deleteDocument(documentId: string): AppDatabaseState {
+  /**
+   * Unified with MySQL `ON DELETE RESTRICT` on `document_renewals.document_id`:
+   * Documents with renewal history cannot be permanently deleted; use archival instead.
+   */
+  deleteDocument(documentId: string): DeleteOperationResult {
     const state = this.readRaw();
+    const doc = state.documents.find((d) => d.id === documentId);
+    if (doc && doc.renewals.length > 0) {
+      return {
+        ok: false,
+        error: `لا يمكن حذف الوثيقة نهائيًا لأنها تحتوي على ${doc.renewals.length} سجل تجديد تاريخي؛ استخدم الأرشفة للاحتفاظ بالتاريخ.`,
+        state,
+      };
+    }
+
     const next: AppDatabaseState = {
       ...state,
       documents: state.documents.filter((d) => d.id !== documentId),
@@ -216,20 +268,13 @@ class LocalStorageDataAdapter implements DataRepository {
       ),
     };
     this.save(next);
-    return next;
+    return { ok: true, state: next };
   }
 
-  upsertCase(c: CaseItem): AppDatabaseState {
-    const state = this.readRaw();
-    const exists = state.cases.some((x) => x.id === c.id);
-    const cases = exists
-      ? state.cases.map((x) => (x.id === c.id ? c : x))
-      : [c, ...state.cases];
-    const next = { ...state, cases };
-    this.save(next);
-    return next;
-  }
-
+  /**
+   * Unified with MySQL `ON DELETE CASCADE` on `case_sessions(case_id)` + `SET NULL` on tasks & calendar items
+   * (cleaning both direct case links AND links to any cascaded child sessions).
+   */
   deleteCase(caseId: string): AppDatabaseState {
     const state = this.readRaw();
     const removedSessionIds = new Set(
@@ -248,12 +293,29 @@ class LocalStorageDataAdapter implements DataRepository {
       labels: state.labels.filter(
         (l) => !(l.targetType === 'case' && l.targetId === caseId)
       ),
-      calendarItems: state.calendarItems.map((c) =>
-        c.linkedRecordType === 'case' && c.linkedRecordId === caseId
+      calendarItems: state.calendarItems.map((c) => {
+        const linkedToCase =
+          c.linkedRecordType === 'case' && c.linkedRecordId === caseId;
+        const linkedToRemovedSession =
+          c.linkedRecordType === 'session' &&
+          !!c.linkedRecordId &&
+          removedSessionIds.has(c.linkedRecordId);
+        return linkedToCase || linkedToRemovedSession
           ? { ...c, linkedRecordType: null, linkedRecordId: null }
-          : c
-      ),
+          : c;
+      }),
     };
+    this.save(next);
+    return next;
+  }
+
+  upsertCase(c: CaseItem): AppDatabaseState {
+    const state = this.readRaw();
+    const exists = state.cases.some((x) => x.id === c.id);
+    const cases = exists
+      ? state.cases.map((x) => (x.id === c.id ? c : x))
+      : [c, ...state.cases];
+    const next = { ...state, cases };
     this.save(next);
     return next;
   }

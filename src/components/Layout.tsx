@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  BarChart3,
   Bell,
   Briefcase,
   CalendarDays,
@@ -28,6 +29,7 @@ import {
   formatDisplayDate,
   getTodayISO,
 } from '../domain/dateUtils';
+import { scoreArabicSearchMatch } from '../domain/searchUtils';
 import { NavSection, RecordType } from '../types/domain';
 import { StatusBadge } from './StatusBadge';
 
@@ -140,118 +142,198 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     }
 
     return list;
-  }, [db.tasks, db.documents, db.sessions, db.poas, db.preferences.documentWarningDays, db.preferences.showHijri, today]);
+  }, [
+    db.tasks,
+    db.documents,
+    db.sessions,
+    db.poas,
+    db.preferences.documentWarningDays,
+    db.preferences.showHijri,
+    today,
+  ]);
 
-  // Global search results grouped by record type
+  // Instant ranked Arabic-normalized search results across all core modules
   const searchGroups = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = searchQuery.trim();
     if (!q) return [];
+
+    const specName = (id: string | null) =>
+      db.specialists.find((s) => s.id === id)?.name || '';
+
+    type RankedHit = {
+      id: string;
+      title: string;
+      meta: string;
+      score: number;
+      navTarget?: NavSection;
+    };
 
     const groups: Array<{
       groupLabel: string;
-      type: RecordType;
-      items: Array<{ id: string; title: string; meta: string }>;
+      type: RecordType | 'specialist';
+      topScore: number;
+      items: RankedHit[];
     }> = [];
 
-    const taskHits = db.tasks
-      .filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) ||
-          (t.letterNumber || '').toLowerCase().includes(q) ||
-          (t.authorityName || '').toLowerCase().includes(q) ||
-          t.departmentName.toLowerCase().includes(q)
-      )
-      .slice(0, 5)
-      .map((t) => ({
-        id: t.id,
-        title: t.title,
-        meta: `${t.type} · ${t.status}`,
-      }));
+    const rankAndFilter = <T,>(
+      rows: T[],
+      getId: (r: T) => string,
+      getTitle: (r: T) => string,
+      getSecondary: (r: T) => Array<string | null | undefined>,
+      getMeta: (r: T) => string,
+      limit = 6,
+      navTarget?: NavSection
+    ): RankedHit[] =>
+      rows
+        .map((r) => {
+          const title = getTitle(r);
+          const score = scoreArabicSearchMatch(q, title, getSecondary(r));
+          return {
+            id: getId(r),
+            title,
+            meta: getMeta(r),
+            score,
+            navTarget,
+          };
+        })
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+
+    const taskHits = rankAndFilter(
+      db.tasks,
+      (t) => t.id,
+      (t) => t.title,
+      (t) => [
+        t.letterNumber,
+        t.authorityName,
+        t.departmentName,
+        t.type,
+        t.status,
+        t.notes,
+        specName(t.specialistId),
+      ],
+      (t) => `${t.type} · ${t.status}`
+    );
     if (taskHits.length > 0) {
-      groups.push({ groupLabel: 'المهام', type: 'task', items: taskHits });
+      groups.push({
+        groupLabel: 'المهام',
+        type: 'task',
+        topScore: taskHits[0].score,
+        items: taskHits,
+      });
     }
 
-    const docHits = db.documents
-      .filter(
-        (d) =>
-          d.name.toLowerCase().includes(q) ||
-          d.referenceNumber.toLowerCase().includes(q) ||
-          d.issuingAuthority.toLowerCase().includes(q)
-      )
-      .slice(0, 5)
-      .map((d) => ({
-        id: d.id,
-        title: d.name,
-        meta: `${d.docType} · ${d.referenceNumber}`,
-      }));
+    const docHits = rankAndFilter(
+      db.documents,
+      (d) => d.id,
+      (d) => d.name,
+      (d) => [d.referenceNumber, d.issuingAuthority, d.docType, d.notes, specName(d.specialistId)],
+      (d) => `${d.docType} · ${d.referenceNumber}`
+    );
     if (docHits.length > 0) {
-      groups.push({ groupLabel: 'الوثائق والتراخيص', type: 'document', items: docHits });
+      groups.push({
+        groupLabel: 'الوثائق والتراخيص',
+        type: 'document',
+        topScore: docHits[0].score,
+        items: docHits,
+      });
     }
 
-    const caseHits = db.cases
-      .filter(
-        (c) =>
-          c.title.toLowerCase().includes(q) ||
-          c.caseNumber.toLowerCase().includes(q) ||
-          c.parties.toLowerCase().includes(q)
-      )
-      .slice(0, 4)
-      .map((c) => ({
-        id: c.id,
-        title: c.title,
-        meta: `قضية رقم ${c.caseNumber} · ${c.status}`,
-      }));
+    const caseHits = rankAndFilter(
+      db.cases,
+      (c) => c.id,
+      (c) => c.title,
+      (c) => [c.caseNumber, c.parties, c.court, c.notes, specName(c.lawyerSpecialistId)],
+      (c) => `قضية رقم ${c.caseNumber} · ${c.status}`
+    );
     if (caseHits.length > 0) {
-      groups.push({ groupLabel: 'القضايا', type: 'case', items: caseHits });
+      groups.push({
+        groupLabel: 'القضايا',
+        type: 'case',
+        topScore: caseHits[0].score,
+        items: caseHits,
+      });
     }
 
-    const sessHits = db.sessions
-      .filter(
-        (s) =>
-          s.title.toLowerCase().includes(q) ||
-          (s.location || '').toLowerCase().includes(q)
-      )
-      .slice(0, 4)
-      .map((s) => ({
-        id: s.id,
-        title: s.title,
-        meta: formatDateTime(s.scheduledAt, db.preferences.showHijri),
-      }));
+    const sessHits = rankAndFilter(
+      db.sessions,
+      (s) => s.id,
+      (s) => s.title,
+      (s) => [s.location, s.outcome, s.notes, specName(s.specialistId)],
+      (s) => formatDateTime(s.scheduledAt, db.preferences.showHijri)
+    );
     if (sessHits.length > 0) {
-      groups.push({ groupLabel: 'الجلسات', type: 'session', items: sessHits });
+      groups.push({
+        groupLabel: 'الجلسات',
+        type: 'session',
+        topScore: sessHits[0].score,
+        items: sessHits,
+      });
     }
 
-    const poaHits = db.poas
-      .filter(
-        (p) =>
-          p.title.toLowerCase().includes(q) ||
-          p.referenceNumber.toLowerCase().includes(q) ||
-          p.agent.toLowerCase().includes(q)
-      )
-      .slice(0, 4)
-      .map((p) => ({
-        id: p.id,
-        title: p.title,
-        meta: `مرجع ${p.referenceNumber}`,
-      }));
+    const poaHits = rankAndFilter(
+      db.poas,
+      (p) => p.id,
+      (p) => p.title,
+      (p) => [p.referenceNumber, p.agent, p.grantor, p.scope, specName(p.specialistId)],
+      (p) => `مرجع ${p.referenceNumber}`
+    );
     if (poaHits.length > 0) {
-      groups.push({ groupLabel: 'الوكالات والتفويضات', type: 'poa', items: poaHits });
+      groups.push({
+        groupLabel: 'الوكالات والتفويضات',
+        type: 'poa',
+        topScore: poaHits[0].score,
+        items: poaHits,
+      });
     }
 
-    const calHits = db.calendarItems
-      .filter((ci) => ci.title.toLowerCase().includes(q))
-      .slice(0, 4)
-      .map((ci) => ({
-        id: ci.id,
-        title: ci.title,
-        meta: `${ci.kind} · ${formatDateTime(ci.scheduledAt, db.preferences.showHijri)}`,
-      }));
+    const calHits = rankAndFilter(
+      db.calendarItems,
+      (ci) => ci.id,
+      (ci) => ci.title,
+      (ci) => [ci.kind, ci.notes, specName(ci.specialistId)],
+      (ci) => `${ci.kind} · ${formatDateTime(ci.scheduledAt, db.preferences.showHijri)}`
+    );
     if (calHits.length > 0) {
-      groups.push({ groupLabel: 'الأحداث والتذكيرات', type: 'calendar_item', items: calHits });
+      groups.push({
+        groupLabel: 'الأحداث والتذكيرات',
+        type: 'calendar_item',
+        topScore: calHits[0].score,
+        items: calHits,
+      });
     }
 
-    return groups;
-  }, [searchQuery, db.tasks, db.documents, db.cases, db.sessions, db.poas, db.calendarItems, db.preferences.showHijri]);
+    const specHits = rankAndFilter(
+      db.specialists,
+      (sp) => sp.id,
+      (sp) => sp.name,
+      (sp) => [sp.departmentName, sp.roleTitle, sp.mobile, sp.email],
+      (sp) => `${sp.roleTitle} · ${sp.departmentName}`,
+      4,
+      'specialists'
+    );
+    if (specHits.length > 0) {
+      groups.push({
+        groupLabel: 'المختصون',
+        type: 'specialist',
+        topScore: specHits[0].score,
+        items: specHits,
+      });
+    }
+
+    return groups.sort((a, b) => b.topScore - a.topScore);
+  }, [
+    searchQuery,
+    db.tasks,
+    db.documents,
+    db.cases,
+    db.sessions,
+    db.poas,
+    db.calendarItems,
+    db.specialists,
+    db.preferences.showHijri,
+  ]);
 
   const navGroups: Array<{
     groupKey: string;
@@ -303,6 +385,12 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           icon: <Scale className="w-4 h-4" />,
           accentClass: 'text-amber-600 dark:text-amber-400',
         },
+        {
+          id: 'reports',
+          label: 'التقارير والإحصاءات',
+          icon: <BarChart3 className="w-4 h-4" />,
+          accentClass: 'text-sky-600 dark:text-sky-400',
+        },
       ],
     },
     {
@@ -340,11 +428,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     <div className="min-h-screen flex flex-col lg:flex-row">
       {/* Desktop Right Collapsible Sidebar */}
       <aside
-        className={`hidden lg:flex flex-col shrink-0 border-l border-slate-200 dark:border-slate-800/80 bg-white/95 dark:bg-[#081226]/90 backdrop-blur-md transition-[width] duration-200 ${
+        className={`hidden lg:flex flex-col shrink-0 border-l border-slate-200 dark:border-white/10 bg-white/95 dark:bg-[#0c0d11]/90 backdrop-blur-md transition-[width] duration-200 ${
           sidebarCollapsed ? 'w-[76px]' : 'w-[264px]'
         }`}
       >
-        <div className="flex items-center justify-between gap-2 px-4 h-16 border-b border-slate-200 dark:border-slate-800/80">
+        <div className="flex items-center justify-between gap-2 px-4 h-16 border-b border-slate-200 dark:border-white/10">
           {!sidebarCollapsed && (
             <div className="min-w-0">
               <div className="flex items-center gap-2">
@@ -363,7 +451,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             title={sidebarCollapsed ? 'فتح القائمة الجانبية' : 'طي القائمة الجانبية'}
             aria-label={sidebarCollapsed ? 'فتح القائمة الجانبية' : 'طي القائمة الجانبية'}
-            className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 mx-auto lg:mx-0"
+            className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10 mx-auto lg:mx-0"
           >
             {sidebarCollapsed ? (
               <ChevronLeft className="w-4 h-4" />
@@ -405,7 +493,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                         className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
                           isActive
                             ? 'bg-blue-50 text-blue-800 dark:bg-blue-500/15 dark:text-blue-200 border border-blue-200/80 dark:border-blue-500/30'
-                            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60 border border-transparent'
+                            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 border border-transparent'
                         }`}
                       >
                         <span className={`shrink-0 ${item.accentClass}`}>{item.icon}</span>
@@ -418,14 +506,18 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           })}
         </nav>
 
-        <div className="p-3 border-t border-slate-200 dark:border-slate-800/80">
+        <div className="p-3 border-t border-slate-200 dark:border-white/10">
           <button
             type="button"
             onClick={toggleTheme}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/70"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-medium border border-slate-200 dark:border-white/15 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
             title={isDark ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع السينمائي'}
           >
-            {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
+            {isDark ? (
+              <Sun className="w-4 h-4 text-amber-400" />
+            ) : (
+              <Moon className="w-4 h-4 text-slate-600" />
+            )}
             {!sidebarCollapsed && (
               <span>{isDark ? 'الوضع النهاري' : 'الوضع السينمائي'}</span>
             )}
@@ -435,8 +527,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
       {/* Main Column */}
       <div className="flex-1 flex flex-col min-w-0 pb-20 lg:pb-0">
-        {/* Top Bar (Compact on mobile <= 56px to respect 15% sticky budget) */}
-        <header className="sticky top-0 z-30 h-14 lg:h-16 px-3 lg:px-6 flex items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800/80 bg-white/90 dark:bg-[#071022]/85 backdrop-blur-md">
+        {/* Top Bar (Compact on mobile <= 56px) */}
+        <header className="sticky top-0 z-30 h-14 lg:h-16 px-3 lg:px-6 flex items-center justify-between gap-3 border-b border-slate-200 dark:border-white/10 bg-white/90 dark:bg-[#0a0b0f]/88 backdrop-blur-md">
           {/* Mobile Brand */}
           <div className="flex items-center gap-2 lg:hidden shrink-0">
             <Briefcase className="w-5 h-5 text-blue-600 dark:text-blue-400" />
@@ -445,7 +537,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             </span>
           </div>
 
-          {/* Global Search */}
+          {/* Instant Live Search */}
           <div className="relative flex-1 max-w-xl">
             <div className="relative flex items-center">
               <Search className="w-4 h-4 text-slate-400 absolute right-3 pointer-events-none" />
@@ -454,9 +546,12 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 value={searchQuery}
                 onFocus={() => setSearchFocused(true)}
                 onBlur={() => window.setTimeout(() => setSearchFocused(false), 180)}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="بحث شامل في المهام، الوثائق، القضايا، الجلسات..."
-                className="w-full h-10 pr-9 pl-8 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-900/80 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setSearchFocused(true);
+                }}
+                placeholder="بحث فوري في المهام، الوثائق، القضايا، الجلسات، المختصين..."
+                className="w-full h-10 pr-9 pl-8 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-[#14161b] text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               {searchQuery && (
                 <button
@@ -479,8 +574,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 ) : (
                   searchGroups.map((grp) => (
                     <div key={grp.groupLabel} className="space-y-1">
-                      <div className="px-2.5 py-1 text-xs font-bold text-slate-500 dark:text-slate-400">
-                        {grp.groupLabel} ({grp.items.length})
+                      <div className="px-2.5 py-1 text-xs font-bold text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                        <span>{grp.groupLabel}</span>
+                        <span className="font-mono-tabular">{grp.items.length}</span>
                       </div>
                       {grp.items.map((item) => (
                         <button
@@ -488,10 +584,14 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                           type="button"
                           onMouseDown={(e) => {
                             e.preventDefault();
-                            openRecord(grp.type, item.id);
+                            if (grp.type === 'specialist') {
+                              setActiveNav('specialists');
+                            } else {
+                              openRecord(grp.type, item.id);
+                            }
                             setSearchFocused(false);
                           }}
-                          className="w-full text-right px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/80 flex items-center justify-between gap-2"
+                          className="w-full text-right px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 flex items-center justify-between gap-2"
                         >
                           <span className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
                             {item.title}
@@ -508,36 +608,34 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             )}
           </div>
 
-          {/* Right/Left Header Actions */}
+          {/* Header Actions */}
           <div className="flex items-center gap-2 shrink-0">
-            {/* Theme toggle on mobile */}
             <button
               type="button"
               onClick={toggleTheme}
               title={isDark ? 'الوضع النهاري' : 'الوضع السينمائي'}
               aria-label="تبديل المظهر"
-              className="lg:hidden min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200"
+              className="lg:hidden min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl border border-slate-200 dark:border-white/15 text-slate-700 dark:text-slate-200"
             >
               {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
             </button>
 
-            {/* In-App Notifications */}
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setAlertsOpen(!alertsOpen)}
                 aria-label="التنبيهات"
-                className="min-h-[40px] px-2.5 flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/70"
+                className="min-h-[40px] px-2.5 flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-white/15 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
               >
                 <Bell className="w-4 h-4" />
-                <span className="text-xs font-bold tabular-nums">{alerts.length}</span>
+                <span className="text-xs font-bold font-mono-tabular">{alerts.length}</span>
               </button>
 
               {alertsOpen && (
                 <div className="absolute left-0 top-12 w-80 sm:w-96 z-50 glass-panel rounded-xl shadow-2xl overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700/70">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-white/10">
                     <span className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                      التنبيهات النشطة ({alerts.length})
+                      التنبيهات النشطة (<span className="font-mono-tabular">{alerts.length}</span>)
                     </span>
                     <button
                       type="button"
@@ -547,7 +645,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                       إغلاق
                     </button>
                   </div>
-                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-white/10">
                     {alerts.length === 0 ? (
                       <p className="p-4 text-sm text-slate-500 dark:text-slate-400 text-center">
                         لا توجد تنبيهات عاجلة حاليًا.
@@ -561,7 +659,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                             setAlertsOpen(false);
                             openRecord(al.type, al.recordId);
                           }}
-                          className="w-full text-right p-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 flex items-start justify-between gap-2"
+                          className="w-full text-right p-3 hover:bg-slate-50 dark:hover:bg-white/5 flex items-start justify-between gap-2"
                         >
                           <div className="min-w-0">
                             <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
@@ -583,15 +681,13 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 p-4 lg:p-6 max-w-[1440px] w-full mx-auto">
-          {children}
-        </main>
+        <main className="flex-1 p-4 lg:p-6 max-w-[1440px] w-full mx-auto">{children}</main>
       </div>
 
-      {/* Mobile Bottom Navigation Bar (5 destinations: اليوم، المهام، التقويم، الوثائق، المزيد) */}
+      {/* Mobile Bottom Navigation Bar */}
       <nav
         aria-label="التنقل السفلي"
-        className="lg:hidden fixed bottom-0 right-0 left-0 z-40 h-16 bg-white/95 dark:bg-[#081226]/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 grid grid-cols-5 items-center"
+        className="lg:hidden fixed bottom-0 right-0 left-0 z-40 h-16 bg-white/95 dark:bg-[#0c0d11]/95 backdrop-blur-md border-t border-slate-200 dark:border-white/10 grid grid-cols-5 items-center"
       >
         {[
           { id: 'today' as NavSection, label: 'اليوم', icon: <Home className="w-5 h-5" /> },
@@ -625,7 +721,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           type="button"
           onClick={() => setMobileMoreOpen(!mobileMoreOpen)}
           className={`min-h-[44px] flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${
-            ['cases', 'vat3a', 'specialists', 'settings'].includes(activeNav) || mobileMoreOpen
+            ['cases', 'reports', 'vat3a', 'specialists', 'settings'].includes(activeNav) ||
+            mobileMoreOpen
               ? 'text-blue-600 dark:text-blue-400 font-bold'
               : 'text-slate-500 dark:text-slate-400'
           }`}
@@ -638,17 +735,15 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Mobile "المزيد" Bottom Sheet */}
       {mobileMoreOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm flex items-end"
+          className="lg:hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end"
           onClick={() => setMobileMoreOpen(false)}
         >
           <div
             className="w-full glass-panel rounded-t-2xl p-4 pb-8 space-y-2"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-700/70">
-              <span className="text-sm font-bold text-slate-900 dark:text-white">
-                أقسام أخرى
-              </span>
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-white/10">
+              <span className="text-sm font-bold text-slate-900 dark:text-white">أقسام أخرى</span>
               <button
                 type="button"
                 onClick={() => setMobileMoreOpen(false)}
@@ -658,10 +753,31 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               </button>
             </div>
             {[
-              { id: 'cases' as NavSection, label: 'القضايا والجلسات والوكالات', icon: <Scale className="w-4 h-4 text-amber-500" /> },
-              { id: 'vat3a' as NavSection, label: 'نموذج ضريبة القيمة المضافة 3A', icon: <Receipt className="w-4 h-4 text-emerald-500" /> },
-              { id: 'specialists' as NavSection, label: 'المختصون وسجل المشاركة', icon: <Users className="w-4 h-4 text-blue-500" /> },
-              { id: 'settings' as NavSection, label: 'الإعدادات والتواريخ', icon: <Settings className="w-4 h-4 text-slate-500" /> },
+              {
+                id: 'cases' as NavSection,
+                label: 'القضايا والجلسات والوكالات',
+                icon: <Scale className="w-4 h-4 text-amber-500" />,
+              },
+              {
+                id: 'reports' as NavSection,
+                label: 'التقارير والإحصاءات',
+                icon: <BarChart3 className="w-4 h-4 text-sky-500" />,
+              },
+              {
+                id: 'vat3a' as NavSection,
+                label: 'نموذج ضريبة القيمة المضافة 3A',
+                icon: <Receipt className="w-4 h-4 text-emerald-500" />,
+              },
+              {
+                id: 'specialists' as NavSection,
+                label: 'المختصون وسجل المشاركة',
+                icon: <Users className="w-4 h-4 text-blue-500" />,
+              },
+              {
+                id: 'settings' as NavSection,
+                label: 'الإعدادات وقواعد 3A والتكاملات',
+                icon: <Settings className="w-4 h-4 text-slate-500" />,
+              },
             ].map((item) => (
               <button
                 key={item.id}
@@ -670,7 +786,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${
                   activeNav === item.id
                     ? 'bg-blue-50 text-blue-800 dark:bg-blue-500/20 dark:text-blue-200'
-                    : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
                 }`}
               >
                 {item.icon}
@@ -683,7 +799,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 toggleTheme();
                 showToast(isDark ? 'تم التفعيل: الوضع النهاري' : 'تم التفعيل: الوضع السينمائي');
               }}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200"
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium border border-slate-200 dark:border-white/15 text-slate-700 dark:text-slate-200"
             >
               {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
               <span>{isDark ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع السينمائي'}</span>

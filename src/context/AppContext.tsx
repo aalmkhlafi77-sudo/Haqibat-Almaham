@@ -8,6 +8,7 @@ import {
   DocumentFilters,
   DocumentItem,
   DocumentRenewal,
+  IntegrationSettings,
   LabelItem,
   NavSection,
   PoaItem,
@@ -21,21 +22,23 @@ import {
   ThemeMode,
   Vat3AArchiveFilters,
   Vat3ADraft,
+  Vat3ARulesConfig,
 } from '../types/domain';
 
 export interface ActiveRecordTarget {
   type: RecordType;
-  id: string | null; // null means creating new
+  id: string | null;
   prefill?: Record<string, unknown>;
 }
 
 export interface ShareTargetPayload {
-  recordType: RecordType | 'document_renewal';
+  recordType: RecordType | 'document_renewal' | 'vat_3a';
   recordId: string;
   recordTitle: string;
   specialistId: string | null;
   scheduledInfo: string;
   defaultMessage: string;
+  vatDraft?: Vat3ADraft;
 }
 
 interface AppContextValue {
@@ -55,6 +58,10 @@ interface AppContextValue {
   setShowHijri: (show: boolean) => void;
   setCurrentSpecialistId: (id: string) => void;
   setDocumentWarningDays: (days: number) => void;
+  setVat3ARules: (rules: Vat3ARulesConfig) => void;
+  updateIntegrations: (partial: Partial<IntegrationSettings>) => void;
+  testServerConnection: (baseUrl: string) => Promise<void>;
+  testAiConnection: (baseUrl: string, provider: IntegrationSettings['aiProvider'], modelName: string) => Promise<void>;
   toggleSectionCollapsed: (key: string) => void;
   setSectionsCollapsed: (keys: string[], collapsed: boolean) => void;
   toggleNavGroupCollapsed: (key: string) => void;
@@ -65,7 +72,7 @@ interface AppContextValue {
   deleteTask: (id: string) => void;
   saveDocument: (doc: Omit<DocumentItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId' | 'renewals'> & { id?: string; renewals?: DocumentRenewal[] }) => DocumentItem;
   recordDocumentRenewal: (documentId: string, renewal: Omit<DocumentRenewal, 'id' | 'documentId'>) => void;
-  deleteDocument: (id: string) => void;
+  deleteDocument: (id: string) => boolean;
   saveCase: (c: Omit<CaseItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }) => CaseItem;
   deleteCase: (id: string) => void;
   saveSession: (s: Omit<SessionItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }) => SessionItem;
@@ -80,14 +87,18 @@ interface AppContextValue {
   deleteSpecialist: (id: string) => void;
   logShareOpened: (
     payload: ShareTargetPayload,
-    specialist: Specialist,
+    specialist: Specialist | null,
     channel: ShareChannel,
-    messageText: string
+    messageText: string,
+    status?: ShareLog['status']
   ) => void;
   saveVat3ADraft: (draft: Vat3ADraft) => void;
   deleteVat3ADraft: (id: string) => void;
   resetDemoData: () => void;
-  getDeleteImpact: (type: RecordType | 'specialist' | 'vat3a', id: string) => { title: string; impactLines: string[] };
+  getDeleteImpact: (
+    type: RecordType | 'specialist' | 'vat3a',
+    id: string
+  ) => { title: string; impactLines: string[]; blockedReason?: string };
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -117,7 +128,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setToast(msg);
     window.setTimeout(() => {
       setToast((curr) => (curr === msg ? null : curr));
-    }, 3200);
+    }, 3400);
   };
 
   const patchPrefs = (partial: Partial<AppPreferences>) => {
@@ -128,17 +139,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveRecord({ type, id, prefill });
   };
 
-  const closeRecord = () => {
-    setActiveRecord(null);
-  };
-
-  const openShareModal = (payload: ShareTargetPayload) => {
-    setShareTarget(payload);
-  };
-
-  const closeShareModal = () => {
-    setShareTarget(null);
-  };
+  const closeRecord = () => setActiveRecord(null);
+  const openShareModal = (payload: ShareTargetPayload) => setShareTarget(payload);
+  const closeShareModal = () => setShareTarget(null);
 
   const setTheme = (theme: ThemeMode) => patchPrefs({ theme });
   const toggleTheme = () =>
@@ -150,6 +153,116 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     patchPrefs({ currentSpecialistId });
   const setDocumentWarningDays = (documentWarningDays: number) =>
     patchPrefs({ documentWarningDays });
+  const setVat3ARules = (vat3aRules: Vat3ARulesConfig) => patchPrefs({ vat3aRules });
+
+  const updateIntegrations = (partial: Partial<IntegrationSettings>) => {
+    patchPrefs({
+      integrations: {
+        ...db.preferences.integrations,
+        ...partial,
+      },
+    });
+  };
+
+  const testServerConnection = async (baseUrl: string) => {
+    const clean = baseUrl.trim().replace(/\/+$/, '');
+    const checkedAt = new Date().toISOString().slice(0, 19);
+    if (!clean) {
+      updateIntegrations({
+        serverBaseUrl: '',
+        serverStatus: 'disconnected',
+        serverLastCheckedAt: checkedAt,
+        serverStatusMessage: 'غير متصل — لم يُحدد عنوان الخادم بعد.',
+      });
+      return;
+    }
+    try {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(`${clean}/health`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      window.clearTimeout(timer);
+      if (res.ok) {
+        updateIntegrations({
+          serverBaseUrl: clean,
+          serverStatus: 'connected',
+          serverLastCheckedAt: checkedAt,
+          serverStatusMessage: `متصل (${res.status})`,
+        });
+        showToast('تم الاتصال بالخادم بنجاح.');
+      } else {
+        updateIntegrations({
+          serverBaseUrl: clean,
+          serverStatus: 'error',
+          serverLastCheckedAt: checkedAt,
+          serverStatusMessage: `تعذّر الاتصال (HTTP ${res.status}) — يعمل النظام محليًا.`,
+        });
+      }
+    } catch {
+      updateIntegrations({
+        serverBaseUrl: clean,
+        serverStatus: 'disconnected',
+        serverLastCheckedAt: checkedAt,
+        serverStatusMessage: 'غير متصل — تعذّر الوصول إلى مسار الخادم، وتبقى الوظائف المحلية متاحة.',
+      });
+    }
+  };
+
+  const testAiConnection = async (
+    baseUrl: string,
+    provider: IntegrationSettings['aiProvider'],
+    modelName: string
+  ) => {
+    const clean = baseUrl.trim().replace(/\/+$/, '');
+    const checkedAt = new Date().toISOString().slice(0, 19);
+    if (!clean) {
+      updateIntegrations({
+        aiProvider: provider,
+        aiModelName: modelName,
+        aiStatus: 'disconnected',
+        aiLastCheckedAt: checkedAt,
+        aiStatusMessage: 'غير متصل — يتطلب ربط عنوان الخادم أولًا لإدارة المفاتيح على الخادم.',
+      });
+      return;
+    }
+    try {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(`${clean}/ai/status?provider=${encodeURIComponent(provider)}&model=${encodeURIComponent(modelName)}`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      window.clearTimeout(timer);
+      if (res.ok) {
+        updateIntegrations({
+          aiProvider: provider,
+          aiModelName: modelName,
+          aiStatus: 'connected',
+          aiLastCheckedAt: checkedAt,
+          aiStatusMessage: `متصل عبر الخادم (${modelName})`,
+        });
+        showToast('تكامل الذكاء الاصطناعي متصل.');
+      } else {
+        updateIntegrations({
+          aiProvider: provider,
+          aiModelName: modelName,
+          aiStatus: 'error',
+          aiLastCheckedAt: checkedAt,
+          aiStatusMessage: `غير متصل (HTTP ${res.status})`,
+        });
+      }
+    } catch {
+      updateIntegrations({
+        aiProvider: provider,
+        aiModelName: modelName,
+        aiStatus: 'disconnected',
+        aiLastCheckedAt: checkedAt,
+        aiStatusMessage: 'غير متصل — تعذّر الوصول إلى مسار الذكاء الاصطناعي على الخادم.',
+      });
+    }
+  };
 
   const toggleSectionCollapsed = (key: string) => {
     const curr = db.preferences.collapsedSections[key] ?? false;
@@ -178,21 +291,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateTaskFilters = (partial: Partial<TaskFilters>) => {
-    patchPrefs({
-      taskFilters: { ...db.preferences.taskFilters, ...partial },
-    });
+    patchPrefs({ taskFilters: { ...db.preferences.taskFilters, ...partial } });
   };
 
   const updateDocumentFilters = (partial: Partial<DocumentFilters>) => {
-    patchPrefs({
-      documentFilters: { ...db.preferences.documentFilters, ...partial },
-    });
+    patchPrefs({ documentFilters: { ...db.preferences.documentFilters, ...partial } });
   };
 
   const updateVatArchiveFilters = (partial: Partial<Vat3AArchiveFilters>) => {
-    patchPrefs({
-      vatArchiveFilters: { ...db.preferences.vatArchiveFilters, ...partial },
-    });
+    patchPrefs({ vatArchiveFilters: { ...db.preferences.vatArchiveFilters, ...partial } });
   };
 
   const nowIso = () => new Date().toISOString().slice(0, 19);
@@ -244,9 +351,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('تم تسجيل التجديد وحفظ التاريخين السابق والجديد.');
   };
 
-  const deleteDocument = (id: string) => {
-    setDb(dataRepository.deleteDocument(id));
+  const deleteDocument = (id: string): boolean => {
+    const res = dataRepository.deleteDocument(id);
+    setDb(res.state);
+    if (!res.ok) {
+      showToast(res.error || 'تعذر حذف الوثيقة.');
+      return false;
+    }
     showToast('تم حذف الوثيقة.');
+    return true;
   };
 
   const saveCase = (
@@ -266,7 +379,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteCase = (id: string) => {
     setDb(dataRepository.deleteCase(id));
-    showToast('تم حذف القضية والجلسات المرتبطة بها.');
+    showToast('تم حذف القضية والجلسات المرتبطة وفك الروابط المتأثرة.');
   };
 
   const saveSession = (
@@ -286,7 +399,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteSession = (id: string) => {
     setDb(dataRepository.deleteSession(id));
-    showToast('تم حذف الجلسة.');
+    showToast('تم حذف الجلسة وفك الروابط المتأثرة.');
   };
 
   const savePoa = (
@@ -371,24 +484,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const logShareOpened = (
     payload: ShareTargetPayload,
-    specialist: Specialist,
+    specialist: Specialist | null,
     channel: ShareChannel,
-    messageText: string
+    messageText: string,
+    status: ShareLog['status'] = 'فُتحت المشاركة'
   ) => {
     const entry: Omit<ShareLog, 'id'> = {
       recordType: payload.recordType,
       recordId: payload.recordId,
       recordTitle: payload.recordTitle,
-      specialistId: specialist.id,
-      specialistName: specialist.name,
+      specialistId: specialist?.id || null,
+      specialistName: specialist?.name || 'مشاركة مباشرة',
       channel,
       scheduledInfo: payload.scheduledInfo,
       messageText,
-      status: 'فُتحت المشاركة',
+      status,
       openedAt: nowIso(),
     };
     setDb(dataRepository.addShareLog(entry));
-    showToast(`فُتحت المشاركة عبر ${channel === 'whatsapp' ? 'واتساب' : 'البريد الإلكتروني'}`);
+    showToast(
+      status === 'تمت المشاركة عبر الجهاز'
+        ? 'تمت المشاركة عبر الجهاز بنجاح.'
+        : `فُتحت المشاركة عبر ${channel === 'whatsapp' ? 'واتساب' : 'البريد الإلكتروني'}`
+    );
   };
 
   const saveVat3ADraft = (draft: Vat3ADraft) => {
@@ -409,7 +527,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const getDeleteImpact = (
     type: RecordType | 'specialist' | 'vat3a',
     id: string
-  ): { title: string; impactLines: string[] } => {
+  ): { title: string; impactLines: string[]; blockedReason?: string } => {
     if (type === 'task') {
       const t = db.tasks.find((x) => x.id === id);
       const lblCount = db.labels.filter((l) => l.targetType === 'task' && l.targetId === id).length;
@@ -426,25 +544,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const d = db.documents.find((x) => x.id === id);
       const linkedTasks = db.tasks.filter((t) => t.documentId === id).length;
       const lblCount = db.labels.filter((l) => l.targetType === 'document' && l.targetId === id).length;
+      const calCount = db.calendarItems.filter(
+        (c) => c.linkedRecordType === 'document' && c.linkedRecordId === id
+      ).length;
       const renCount = d?.renewals.length ?? 0;
       const impactLines: string[] = [];
-      if (renCount > 0)
-        impactLines.push(
-          `تحتوي الوثيقة على ${renCount} سجل تجديد تاريخي؛ يُفضّل الأرشفة للاحتفاظ بالتاريخ بدل الحذف النهائي.`
-        );
+      if (renCount > 0) {
+        return {
+          title: d?.name || 'الوثيقة',
+          blockedReason: `هذه الوثيقة تحتوي على ${renCount} سجل تجديد تاريخي. وفق قواعد حماية السجل (المتطابقة مع MySQL ON DELETE RESTRICT)، يُمنع الحذف النهائي ويجب استخدام «أرشفة الوثيقة» للاحتفاظ بالتاريخ.`,
+          impactLines: [
+            `عدد سجلات التجديد المحفوظة: ${renCount}`,
+            linkedTasks > 0 ? `المهام المرتبطة: ${linkedTasks}` : '',
+          ].filter(Boolean),
+        };
+      }
       if (linkedTasks > 0) impactLines.push(`سيُفك ارتباط ${linkedTasks} مهمة تجديد بهذه الوثيقة.`);
+      if (calCount > 0) impactLines.push(`سيُفك ارتباط ${calCount} عنصر في التقويم.`);
       if (lblCount > 0) impactLines.push(`سيتم حذف ${lblCount} ملصق مرتبط بالوثيقة.`);
       return { title: d?.name || 'الوثيقة', impactLines };
     }
 
     if (type === 'case') {
       const c = db.cases.find((x) => x.id === id);
-      const sessCount = db.sessions.filter((s) => s.caseId === id).length;
-      const taskCount = db.tasks.filter((t) => t.caseId === id).length;
+      const sessIds = new Set(db.sessions.filter((s) => s.caseId === id).map((s) => s.id));
+      const sessCount = sessIds.size;
+      const taskCount = db.tasks.filter(
+        (t) => t.caseId === id || (t.sessionId && sessIds.has(t.sessionId))
+      ).length;
+      const calCount = db.calendarItems.filter(
+        (ci) =>
+          (ci.linkedRecordType === 'case' && ci.linkedRecordId === id) ||
+          (ci.linkedRecordType === 'session' &&
+            !!ci.linkedRecordId &&
+            sessIds.has(ci.linkedRecordId))
+      ).length;
       const lblCount = db.labels.filter((l) => l.targetType === 'case' && l.targetId === id).length;
       const impactLines: string[] = [];
       if (sessCount > 0) impactLines.push(`سيتم حذف ${sessCount} جلسة مرتبطة بهذه القضية نهائيًا.`);
-      if (taskCount > 0) impactLines.push(`سيُفك ارتباط ${taskCount} مهمة عن هذه القضية.`);
+      if (taskCount > 0) impactLines.push(`سيُفك ارتباط ${taskCount} مهمة مرتبطة بالقضية أو جلساتها.`);
+      if (calCount > 0) impactLines.push(`سيُفك ارتباط ${calCount} عنصر في التقويم مرتبط بالقضية أو جلساتها.`);
       if (lblCount > 0) impactLines.push(`سيتم حذف ${lblCount} ملصق مرتبط بالقضية.`);
       return { title: c?.title || 'القضية', impactLines };
     }
@@ -452,14 +591,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (type === 'session') {
       const s = db.sessions.find((x) => x.id === id);
       const taskCount = db.tasks.filter((t) => t.sessionId === id).length;
+      const calCount = db.calendarItems.filter(
+        (ci) => ci.linkedRecordType === 'session' && ci.linkedRecordId === id
+      ).length;
       const impactLines: string[] = [];
       if (taskCount > 0) impactLines.push(`سيُفك ارتباط ${taskCount} مهمة بهذه الجلسة.`);
+      if (calCount > 0) impactLines.push(`سيُفك ارتباط ${calCount} عنصر في التقويم بهذه الجلسة.`);
       return { title: s?.title || 'الجلسة', impactLines };
     }
 
     if (type === 'poa') {
       const p = db.poas.find((x) => x.id === id);
-      return { title: p?.title || 'الوكالة', impactLines: [] };
+      const calCount = db.calendarItems.filter(
+        (ci) => ci.linkedRecordType === 'poa' && ci.linkedRecordId === id
+      ).length;
+      return {
+        title: p?.title || 'الوكالة',
+        impactLines: calCount > 0 ? [`سيُفك ارتباط ${calCount} عنصر في التقويم.`] : [],
+      };
     }
 
     if (type === 'calendar_item') {
@@ -472,10 +621,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const tCount = db.tasks.filter((t) => t.specialistId === id).length;
       const dCount = db.documents.filter((d) => d.specialistId === id).length;
       const cCount = db.cases.filter((c) => c.lawyerSpecialistId === id).length;
+      const calCount = db.calendarItems.filter((ci) => ci.specialistId === id).length;
       const impactLines: string[] = [];
-      if (tCount + dCount + cCount > 0) {
+      if (tCount + dCount + cCount + calCount > 0) {
         impactLines.push(
-          `سيتحول إسناد (${tCount} مهمة، ${dCount} وثيقة، ${cCount} قضية) إلى «غير مسند».`
+          `سيتحول إسناد (${tCount} مهمة، ${dCount} وثيقة، ${cCount} قضية، ${calCount} موعد) إلى «غير مسند».`
         );
       }
       return { title: sp?.name || 'المختص', impactLines };
@@ -507,6 +657,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setShowHijri,
         setCurrentSpecialistId,
         setDocumentWarningDays,
+        setVat3ARules,
+        updateIntegrations,
+        testServerConnection,
+        testAiConnection,
         toggleSectionCollapsed,
         setSectionsCollapsed,
         toggleNavGroupCollapsed,

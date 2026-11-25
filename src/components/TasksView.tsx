@@ -6,7 +6,8 @@ import {
   formatDisplayDate,
   getTodayISO,
 } from '../domain/dateUtils';
-import { TaskStatus, TaskType } from '../types/domain';
+import { scoreArabicSearchMatch } from '../domain/searchUtils';
+import { TaskItem, TaskStatus, TaskType } from '../types/domain';
 import { StatusBadge } from './StatusBadge';
 
 export const TasksView: React.FC = () => {
@@ -19,47 +20,53 @@ export const TasksView: React.FC = () => {
     db.specialists.find((s) => s.id === id)?.name || 'غير مسند';
 
   const filteredTasks = useMemo(() => {
-    const q = filters.search.trim().toLowerCase();
+    const q = filters.search.trim();
     return db.tasks
-      .filter((t) => {
-        if (t.archivedAt) return false;
+      .map((t) => {
+        if (t.archivedAt) return null;
         if (filters.onlyMine && t.specialistId !== db.preferences.currentSpecialistId) {
-          return false;
+          return null;
         }
-        if (filters.type !== 'الكل' && t.type !== filters.type) return false;
+        if (filters.type !== 'الكل' && t.type !== filters.type) return null;
         if (filters.status === 'المفتوحة') {
-          if (t.status === 'مكتملة' || t.status === 'ملغاة') return false;
+          if (t.status === 'مكتملة' || t.status === 'ملغاة') return null;
         } else if (filters.status !== 'الكل' && t.status !== filters.status) {
-          return false;
+          return null;
         }
         if (filters.specialistId !== 'الكل' && t.specialistId !== filters.specialistId) {
-          return false;
+          return null;
         }
-        if (filters.dueFilter === 'اليوم' && t.dueDate !== today) return false;
+        if (filters.dueFilter === 'اليوم' && t.dueDate !== today) return null;
         if (filters.dueFilter === 'متأخرة' && !evaluateTaskDelay(t, today).isOverdue) {
-          return false;
+          return null;
         }
         if (
           filters.dueFilter === 'قادمة' &&
           !(t.dueDate > today && t.status !== 'مكتملة' && t.status !== 'ملغاة')
         ) {
-          return false;
+          return null;
         }
-        if (q) {
-          const hay = [
-            t.title,
-            t.departmentName,
-            t.letterNumber || '',
-            t.authorityName || '',
-            getSpecialistName(t.specialistId),
-          ]
-            .join(' ')
-            .toLowerCase();
-          if (!hay.includes(q)) return false;
-        }
-        return true;
+        const score = q
+          ? scoreArabicSearchMatch(q, t.title, [
+              t.departmentName,
+              t.letterNumber,
+              t.authorityName,
+              t.type,
+              t.status,
+              t.notes,
+              getSpecialistName(t.specialistId),
+            ])
+          : 1;
+        if (score <= 0) return null;
+        return { t, score };
       })
-      .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+      .filter((x): x is { t: TaskItem; score: number } => x !== null)
+      .sort((a, b) =>
+        q && b.score !== a.score
+          ? b.score - a.score
+          : a.t.dueDate.localeCompare(b.t.dueDate)
+      )
+      .map((x) => x.t);
   }, [db.tasks, db.specialists, db.preferences.currentSpecialistId, filters, today]);
 
   const currentSpecName = getSpecialistName(db.preferences.currentSpecialistId);

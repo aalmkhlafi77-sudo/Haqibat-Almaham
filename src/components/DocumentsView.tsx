@@ -6,6 +6,7 @@ import {
   formatDisplayDate,
   getTodayISO,
 } from '../domain/dateUtils';
+import { scoreArabicSearchMatch } from '../domain/searchUtils';
 import { DocumentCategoryFilter } from '../types/domain';
 import { StatusBadge } from './StatusBadge';
 
@@ -58,25 +59,36 @@ export const DocumentsView: React.FC = () => {
   }, [evaluatedDocs]);
 
   const filteredDocs = useMemo(() => {
-    const q = filters.search.trim().toLowerCase();
-    return evaluatedDocs.filter(({ doc, health }) => {
-      if (filters.category === 'الكل') {
-        if (doc.archivedAt) return false;
-      } else if (health.filterBucket !== filters.category) {
-        return false;
-      }
-      if (filters.specialistId !== 'الكل' && doc.specialistId !== filters.specialistId) {
-        return false;
-      }
-      if (q) {
-        const hay = [doc.name, doc.docType, doc.referenceNumber, doc.issuingAuthority]
-          .join(' ')
-          .toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
-  }, [evaluatedDocs, filters]);
+    const q = filters.search.trim();
+    return evaluatedDocs
+      .map(({ doc, health }) => {
+        if (filters.category === 'الكل') {
+          if (doc.archivedAt) return null;
+        } else if (health.filterBucket !== filters.category) {
+          return null;
+        }
+        if (filters.specialistId !== 'الكل' && doc.specialistId !== filters.specialistId) {
+          return null;
+        }
+        const score = q
+          ? scoreArabicSearchMatch(q, doc.name, [
+              doc.docType,
+              doc.referenceNumber,
+              doc.issuingAuthority,
+              doc.notes,
+              getSpecialistName(doc.specialistId),
+            ])
+          : 1;
+        if (score <= 0) return null;
+        return { doc, health, score };
+      })
+      .filter(
+        (x): x is { doc: (typeof evaluatedDocs)[number]['doc']; health: (typeof evaluatedDocs)[number]['health']; score: number } =>
+          x !== null
+      )
+      .sort((a, b) => (q ? b.score - a.score : 0))
+      .map(({ doc, health }) => ({ doc, health }));
+  }, [evaluatedDocs, filters, db.specialists]);
 
   return (
     <div className="space-y-4">

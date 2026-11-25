@@ -7,25 +7,39 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Copy,
+  Download,
+  FileSpreadsheet,
   FlaskConical,
   FolderOpen,
   Plus,
+  Printer,
   Receipt,
+  RefreshCw,
   RotateCcw,
   Save,
+  Share2,
   Trash2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { generateId } from '../data/repository';
-import { formatDisplayDate } from '../domain/dateUtils';
+import { formatDisplayDate, toEnglishDigits } from '../domain/dateUtils';
+import { scoreArabicSearchMatch } from '../domain/searchUtils';
 import {
   createEmptyVat3ALines,
   evaluateVat3ADraft,
   formatHalalas,
+  VAT_3A_LINE_DEFINITIONS,
   VAT_3A_RULES_VERSION,
   VAT_3A_TEST_PRESETS,
   Vat3ATestPreset,
 } from '../domain/vat3aEngine';
+import {
+  buildVat3AShareSummaryText,
+  downloadVat3AArchiveExcel,
+  downloadVat3AArchivePdf,
+  downloadVat3AExcel,
+  downloadVat3APdf,
+} from '../domain/vat3aExport';
 import { Vat3ADraft, Vat3ADraftStatus, Vat3ALineId } from '../types/domain';
 import { StatusBadge } from './StatusBadge';
 
@@ -36,6 +50,7 @@ export const Vat3AView: React.FC = () => {
     deleteVat3ADraft,
     updateVatArchiveFilters,
     getDeleteImpact,
+    openShareModal,
     showToast,
   } = useApp();
 
@@ -43,31 +58,33 @@ export const Vat3AView: React.FC = () => {
     db.vat3aDrafts.find((d) => !d.isTestSample && d.status !== 'مؤرشفة') ||
     db.vat3aDrafts[0];
 
+  const makeBlankDraft = (): Vat3ADraft => ({
+    id: generateId('vat'),
+    orgId: 'org-01',
+    entityName: db.organizations[0]?.name || 'شركة المدار للأعمال والاستشارات',
+    taxRegistrationNumber: db.organizations[0]?.taxRegistrationNumber || '',
+    periodStart: '2026-10-01',
+    periodEnd: '2026-12-31',
+    status: 'مسودة',
+    calcRulesVersion: VAT_3A_RULES_VERSION,
+    rulesSnapshot: structuredClone(db.preferences.vat3aRules),
+    editorName:
+      db.specialists.find((s) => s.id === db.preferences.currentSpecialistId)?.name ||
+      'المستخدم',
+    isTestSample: false,
+    lines: createEmptyVat3ALines(),
+    item14PeriodRef: '',
+    item14Reason: '',
+    negativeBaseExplanation: '',
+    computedNetHalalas: 0,
+    updatedAt: new Date().toISOString().slice(0, 19),
+    archivedAt: null,
+  });
+
   const [draft, setDraft] = useState<Vat3ADraft>(() =>
-    initialWorking
-      ? structuredClone(initialWorking)
-      : {
-          id: generateId('vat'),
-          orgId: 'org-01',
-          entityName: db.organizations[0]?.name || 'شركة المدار للأعمال والاستشارات',
-          taxRegistrationNumber: db.organizations[0]?.taxRegistrationNumber || '',
-          periodStart: '2026-10-01',
-          periodEnd: '2026-12-31',
-          status: 'مسودة',
-          calcRulesVersion: VAT_3A_RULES_VERSION,
-          editorName:
-            db.specialists.find((s) => s.id === db.preferences.currentSpecialistId)?.name ||
-            'المستخدم',
-          isTestSample: false,
-          lines: createEmptyVat3ALines(),
-          item14PeriodRef: '',
-          item14Reason: '',
-          negativeBaseExplanation: '',
-          computedNetHalalas: 0,
-          updatedAt: new Date().toISOString().slice(0, 19),
-          archivedAt: null,
-        }
+    initialWorking ? structuredClone(initialWorking) : makeBlankDraft()
   );
+  const [printTargetDraft, setPrintTargetDraft] = useState<Vat3ADraft | null>(null);
 
   const [lastWorkingDraftId, setLastWorkingDraftId] = useState<string>(
     initialWorking?.id || ''
@@ -89,7 +106,17 @@ export const Vat3AView: React.FC = () => {
     16: true,
   });
 
-  const evalResult = useMemo(() => evaluateVat3ADraft(draft), [draft]);
+  const evalResult = useMemo(
+    () => evaluateVat3ADraft(draft, db.preferences.vat3aRules),
+    [draft, db.preferences.vat3aRules]
+  );
+
+  const isRulesOutOfSync = useMemo(() => {
+    const currentStr = JSON.stringify(db.preferences.vat3aRules);
+    const snapStr = JSON.stringify(evalResult.appliedRules);
+    return currentStr !== snapStr;
+  }, [db.preferences.vat3aRules, evalResult.appliedRules]);
+
   const isArchived = draft.status === 'مؤرشفة';
   const showHijri = db.preferences.showHijri;
   const archiveFilters = db.preferences.vatArchiveFilters;
@@ -108,7 +135,15 @@ export const Vat3AView: React.FC = () => {
           d.periodEnd === draft.periodEnd
       ) || null
     );
-  }, [db.vat3aDrafts, draft.id, draft.isTestSample, draft.entityName, draft.periodStart, draft.periodEnd, isArchived]);
+  }, [
+    db.vat3aDrafts,
+    draft.id,
+    draft.isTestSample,
+    draft.entityName,
+    draft.periodStart,
+    draft.periodEnd,
+    isArchived,
+  ]);
 
   const handleLineChange = (
     lineId: Vat3ALineId,
@@ -128,6 +163,19 @@ export const Vat3AView: React.FC = () => {
     }));
   };
 
+  const handleRecalculateWithCurrentSettings = () => {
+    if (isArchived) return;
+    const nextSnapshot = structuredClone(db.preferences.vat3aRules);
+    const nextDraft: Vat3ADraft = {
+      ...draft,
+      calcRulesVersion: VAT_3A_RULES_VERSION,
+      rulesSnapshot: nextSnapshot,
+    };
+    nextDraft.computedNetHalalas = evaluateVat3ADraft(nextDraft).v16Halalas;
+    setDraft(nextDraft);
+    showToast('تمت إعادة الاحتساب وفق قواعد 3A الحالية في الإعدادات (اضغط «حفظ المسودة» لاعتمادها).');
+  };
+
   const handleSaveDraft = () => {
     if (!evalResult.isValid) {
       showToast('تعذّر الحفظ: صحّح الحقول غير الصالحة الظاهرة في النموذج.');
@@ -136,6 +184,7 @@ export const Vat3AView: React.FC = () => {
     const updated: Vat3ADraft = {
       ...draft,
       calcRulesVersion: VAT_3A_RULES_VERSION,
+      rulesSnapshot: draft.rulesSnapshot || structuredClone(evalResult.appliedRules),
       computedNetHalalas: evalResult.v16Halalas,
       updatedAt: new Date().toISOString().slice(0, 19),
     };
@@ -144,31 +193,11 @@ export const Vat3AView: React.FC = () => {
     if (!updated.isTestSample) {
       setLastWorkingDraftId(updated.id);
     }
-    showToast('تم حفظ مسودة 3A بالنتائج المحسوبة.');
+    showToast('تم حفظ مسودة 3A بالنتائج والقواعد المعتمدة.');
   };
 
   const handleCreateNewDraft = () => {
-    const newDraft: Vat3ADraft = {
-      id: generateId('vat'),
-      orgId: 'org-01',
-      entityName: db.organizations[0]?.name || 'شركة المدار للأعمال والاستشارات',
-      taxRegistrationNumber: db.organizations[0]?.taxRegistrationNumber || '',
-      periodStart: '2026-10-01',
-      periodEnd: '2026-12-31',
-      status: 'مسودة',
-      calcRulesVersion: VAT_3A_RULES_VERSION,
-      editorName:
-        db.specialists.find((s) => s.id === db.preferences.currentSpecialistId)?.name ||
-        'المستخدم',
-      isTestSample: false,
-      lines: createEmptyVat3ALines(),
-      item14PeriodRef: '',
-      item14Reason: '',
-      negativeBaseExplanation: '',
-      computedNetHalalas: 0,
-      updatedAt: new Date().toISOString().slice(0, 19),
-      archivedAt: null,
-    };
+    const newDraft = makeBlankDraft();
     setDraft(newDraft);
     setLastWorkingDraftId(newDraft.id);
   };
@@ -191,6 +220,7 @@ export const Vat3AView: React.FC = () => {
       ...draft,
       status: nextStatus,
       archivedAt: nextStatus === 'مؤرشفة' ? new Date().toISOString().slice(0, 19) : null,
+      rulesSnapshot: draft.rulesSnapshot || structuredClone(evalResult.appliedRules),
       computedNetHalalas: evalResult.v16Halalas,
       updatedAt: new Date().toISOString().slice(0, 19),
     };
@@ -206,7 +236,6 @@ export const Vat3AView: React.FC = () => {
       return;
     }
     const copiedLines = structuredClone(draft.lines);
-    // Per 3A Doc: reset Items 14 & 15 to 0 for user review when copying
     copiedLines[14] = { amountRaw: '0', adjustmentRaw: '' };
     copiedLines[15] = { amountRaw: '0', adjustmentRaw: '' };
 
@@ -217,6 +246,7 @@ export const Vat3AView: React.FC = () => {
       periodEnd: copyEnd,
       status: 'مسودة',
       isTestSample: false,
+      rulesSnapshot: structuredClone(db.preferences.vat3aRules),
       lines: copiedLines,
       item14PeriodRef: '',
       item14Reason: '',
@@ -228,12 +258,9 @@ export const Vat3AView: React.FC = () => {
     setDraft(copied);
     setLastWorkingDraftId(copied.id);
     setCopyModalOpen(false);
-    showToast('تم نسخ النموذج لفترة جديدة مع تصفير البندين 14 و15 للمراجعة.');
+    showToast('تم نسخ النموذج لفترة جديدة وفق الإعدادات الحالية وتصفير البندين 14 و15.');
   };
 
-  /**
-   * Opens a test preset inside a SEPARATE test draft so active working drafts are preserved.
-   */
   const handleLoadTestPreset = (preset: Vat3ATestPreset) => {
     if (!draft.isTestSample && db.vat3aDrafts.some((d) => d.id === draft.id)) {
       setLastWorkingDraftId(draft.id);
@@ -248,6 +275,7 @@ export const Vat3AView: React.FC = () => {
       periodEnd: '2026-12-31',
       status: 'مسودة',
       calcRulesVersion: VAT_3A_RULES_VERSION,
+      rulesSnapshot: fields.rulesSnapshot || structuredClone(db.preferences.vat3aRules),
       editorName: 'مسودة اختبار المعاينة',
       isTestSample: true,
       lines: fields.lines || createEmptyVat3ALines(),
@@ -275,24 +303,53 @@ export const Vat3AView: React.FC = () => {
     }
   };
 
-  const filteredArchive = useMemo(() => {
-    const q = archiveFilters.search.trim().toLowerCase();
-    return db.vat3aDrafts.filter((d) => {
-      if (archiveFilters.status !== 'الكل' && d.status !== archiveFilters.status) {
-        return false;
-      }
-      if (
-        archiveFilters.entityName !== 'الكل' &&
-        d.entityName !== archiveFilters.entityName
-      ) {
-        return false;
-      }
-      if (q) {
-        const hay = `${d.entityName} ${d.taxRegistrationNumber} ${d.periodStart} ${d.periodEnd}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
+  const handlePrintDraft = (target: Vat3ADraft) => {
+    setPrintTargetDraft(target);
+    window.setTimeout(() => {
+      window.print();
+    }, 80);
+  };
+
+  const handleShareDraft = (target: Vat3ADraft) => {
+    openShareModal({
+      recordType: 'vat_3a',
+      recordId: target.id,
+      recordTitle: `نموذج 3A — ${target.entityName}`,
+      specialistId: db.preferences.currentSpecialistId || null,
+      scheduledInfo: `${target.periodStart} ← ${target.periodEnd}`,
+      defaultMessage: buildVat3AShareSummaryText(target),
+      vatDraft: target,
     });
+  };
+
+  const filteredArchive = useMemo(() => {
+    const q = archiveFilters.search.trim();
+    return db.vat3aDrafts
+      .map((d) => {
+        if (archiveFilters.status !== 'الكل' && d.status !== archiveFilters.status) {
+          return null;
+        }
+        if (
+          archiveFilters.entityName !== 'الكل' &&
+          d.entityName !== archiveFilters.entityName
+        ) {
+          return null;
+        }
+        const score = q
+          ? scoreArabicSearchMatch(q, d.entityName, [
+              d.taxRegistrationNumber,
+              d.periodStart,
+              d.periodEnd,
+              d.status,
+              d.editorName,
+            ])
+          : 1;
+        if (score <= 0) return null;
+        return { d, score };
+      })
+      .filter((x): x is { d: Vat3ADraft; score: number } => x !== null)
+      .sort((a, b) => (q ? b.score - a.score : b.d.updatedAt.localeCompare(a.d.updatedAt)))
+      .map((x) => x.d);
   }, [db.vat3aDrafts, archiveFilters]);
 
   const entityNames = Array.from(new Set(db.vat3aDrafts.map((d) => d.entityName)));
@@ -307,10 +364,15 @@ export const Vat3AView: React.FC = () => {
   };
 
   const deleteImpact = deleteConfirmId ? getDeleteImpact('vat3a', deleteConfirmId) : null;
+  const activePrintDraft = printTargetDraft || draft;
+  const activePrintEval = useMemo(
+    () => evaluateVat3ADraft(activePrintDraft, db.preferences.vat3aRules),
+    [activePrintDraft, db.preferences.vat3aRules]
+  );
 
   return (
     <div className="space-y-4">
-      {/* Header */}
+      {/* Header & Open Draft Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl lg:text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -327,16 +389,17 @@ export const Vat3AView: React.FC = () => {
               }
             />
           </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            مسودة داخلية للمعاينة والمراجعة • إصدار القواعد: {VAT_3A_RULES_VERSION}
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-mono-tabular">
+            مسودة داخلية للمراجعة · النسبة الافتراضية المعتمدة:{' '}
+            {toEnglishDigits(String(evalResult.appliedRules.defaultRatePercent))}%
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
             onClick={handleCreateNewDraft}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>مسودة جديدة</span>
@@ -353,10 +416,57 @@ export const Vat3AView: React.FC = () => {
             </button>
           )}
 
+          {/* Share / Print / Download PDF & Excel on open draft */}
+          <button
+            type="button"
+            onClick={() => handleShareDraft(draft)}
+            className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+            title="مشاركة النموذج"
+          >
+            <Share2 className="w-3.5 h-3.5 text-blue-500" />
+            <span>مشاركة</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handlePrintDraft(draft)}
+            className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+            title="طباعة النموذج"
+          >
+            <Printer className="w-3.5 h-3.5 text-slate-500 dark:text-slate-300" />
+            <span>طباعة</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              downloadVat3APdf(draft);
+              showToast('تم تحميل ملف PDF للنموذج.');
+            }}
+            className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+            title="تحميل PDF"
+          >
+            <Download className="w-3.5 h-3.5 text-rose-500" />
+            <span>PDF</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              downloadVat3AExcel(draft);
+              showToast('تم تحميل ملف Excel للنموذج.');
+            }}
+            className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+            title="تحميل Excel"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
+            <span>Excel</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setCopyModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
           >
             <Copy className="w-3.5 h-3.5" />
             <span>نسخ لفترة جديدة</span>
@@ -365,7 +475,7 @@ export const Vat3AView: React.FC = () => {
           <button
             type="button"
             onClick={handleArchiveToggle}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
           >
             <Archive className="w-3.5 h-3.5" />
             <span>{isArchived ? 'إعادة فتح للتعديل' : 'أرشفة'}</span>
@@ -386,8 +496,27 @@ export const Vat3AView: React.FC = () => {
 
       {/* Preview Disclaimer Banner */}
       <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/70 bg-emerald-50/70 dark:bg-emerald-950/30 px-4 py-3 text-xs text-emerald-900 dark:text-emerald-200 leading-relaxed">
-        <strong>تنبيه المعاينة:</strong> هذه الشاشة مسودة للمعاينة والمراجعة الداخلية بقيم تجريبية، ولا تُغني عن مطابقة المعادلات وسياسة التقريب والخصم مع نموذج هيئة الزكاة والضريبة والجمارك ومراجعة المحاسب قبل الاستخدام التشغيلي.
+        <strong>تنبيه المعاينة:</strong> هذه الشاشة مسودة للمعاينة والمراجعة الداخلية، ولا تُغني عن مطابقة المعادلات مع نموذج هيئة الزكاة والضريبة والجمارك ومراجعة المحاسب قبل الاعتماد الرسمي.
       </div>
+
+      {/* Rules Snapshot Sync Banner */}
+      {isRulesOutOfSync && (
+        <div className="rounded-xl border border-blue-300 dark:border-blue-500/40 bg-blue-50/80 dark:bg-blue-950/35 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs text-blue-900 dark:text-blue-200">
+          <span>
+            تعتمد هذه المسودة قواعدها المحفوظة وقت إنشائها لحماية نتائجها من التغيّر التلقائي. إذا أردت تطبيق إعدادات «قواعد حساب 3A» الحالية عليها، اختر إعادة الاحتساب:
+          </span>
+          {!isArchived && (
+            <button
+              type="button"
+              onClick={handleRecalculateWithCurrentSettings}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-semibold whitespace-nowrap"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>إعادة الاحتساب وفق الإعدادات الحالية</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Separate Test Draft Banner & Quick Test Presets */}
       <div className="glass-panel rounded-xl p-3.5 space-y-2.5">
@@ -418,7 +547,7 @@ export const Vat3AView: React.FC = () => {
               className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
                 draft.id === `vat-test-${preset.key}`
                   ? 'border-emerald-600 bg-emerald-600 text-white'
-                  : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/70 text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/50'
+                  : 'border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-[#14161b] text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/50'
               }`}
             >
               {preset.title}
@@ -437,7 +566,8 @@ export const Vat3AView: React.FC = () => {
       {duplicateActiveDraft && (
         <div className="rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/50 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900 dark:text-amber-200">
           <span>
-            توجد مسودة نشطة مطابقة لنفس المنشأة والفترة ({duplicateActiveDraft.periodStart} ← {duplicateActiveDraft.periodEnd}).
+            توجد مسودة نشطة مطابقة لنفس المنشأة والفترة ({duplicateActiveDraft.periodStart} ←{' '}
+            {duplicateActiveDraft.periodEnd}).
           </span>
           <button
             type="button"
@@ -460,7 +590,7 @@ export const Vat3AView: React.FC = () => {
             disabled={isArchived}
             value={draft.entityName}
             onChange={(e) => setDraft({ ...draft, entityName: e.target.value })}
-            className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm disabled:opacity-60"
+            className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-sm disabled:opacity-60"
           />
         </div>
         <div>
@@ -469,13 +599,14 @@ export const Vat3AView: React.FC = () => {
           </label>
           <input
             type="text"
+            dir="ltr"
             disabled={isArchived}
             value={draft.taxRegistrationNumber}
             onChange={(e) =>
               setDraft({ ...draft, taxRegistrationNumber: e.target.value })
             }
             placeholder="310xxxxxxxxxxxx"
-            className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-mono-tabular disabled:opacity-60"
+            className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-sm font-mono-tabular disabled:opacity-60"
           />
         </div>
         <div>
@@ -484,10 +615,12 @@ export const Vat3AView: React.FC = () => {
           </label>
           <input
             type="date"
+            lang="en"
+            dir="ltr"
             disabled={isArchived}
             value={draft.periodStart}
             onChange={(e) => setDraft({ ...draft, periodStart: e.target.value })}
-            className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm disabled:opacity-60"
+            className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-sm font-mono-tabular disabled:opacity-60"
           />
         </div>
         <div>
@@ -496,10 +629,12 @@ export const Vat3AView: React.FC = () => {
           </label>
           <input
             type="date"
+            lang="en"
+            dir="ltr"
             disabled={isArchived}
             value={draft.periodEnd}
             onChange={(e) => setDraft({ ...draft, periodEnd: e.target.value })}
-            className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm disabled:opacity-60"
+            className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-sm font-mono-tabular disabled:opacity-60"
           />
         </div>
 
@@ -512,7 +647,7 @@ export const Vat3AView: React.FC = () => {
               onChange={(e) =>
                 setDraft({ ...draft, status: e.target.value as Vat3ADraftStatus })
               }
-              className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2.5 py-1 text-xs disabled:opacity-60"
+              className="rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-2.5 py-1 text-xs disabled:opacity-60"
             >
               <option value="مسودة">مسودة</option>
               <option value="قيد المراجعة">قيد المراجعة</option>
@@ -544,24 +679,39 @@ export const Vat3AView: React.FC = () => {
         </div>
       )}
 
-      {/* DESKTOP TABLE (Columns from right: رقم البند واسمه | المبلغ | التعديل | الضريبة) */}
+      {/* DESKTOP TABLE */}
       <div className="hidden md:block glass-panel rounded-xl overflow-hidden">
         <table className="w-full border-collapse text-sm">
           <thead>
-            <tr className="border-b border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-900/80 text-xs font-bold text-slate-700 dark:text-slate-200">
-              <th className="text-right py-3 px-4 w-[42%]">رقم البند واسمه</th>
-              <th className="text-right py-3 px-3 w-[19%]">المبلغ (ر.س)</th>
-              <th className="text-right py-3 px-3 w-[19%]">التعديل (ر.س)</th>
+            <tr className="border-b border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#14161b] text-xs font-bold text-slate-700 dark:text-slate-200">
+              <th className="text-right py-3 px-4 w-[40%]">رقم البند واسمه</th>
+              <th className="text-right py-3 px-3 w-[20%]">المبلغ (ر.س)</th>
+              <th className="text-right py-3 px-3 w-[20%]">التعديل (ر.س)</th>
               <th className="text-right py-3 px-4 w-[20%]">الضريبة (ر.س)</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+          <tbody className="divide-y divide-slate-100 dark:divide-white/10">
             {([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] as Vat3ALineId[]).map(
               (lineId) => {
                 const comp = evalResult.lines[lineId];
                 const def = comp.definition;
                 const raw = draft.lines[lineId] || { amountRaw: '', adjustmentRaw: '' };
                 const isTotalRow = !!def.isTotal;
+                const ruleTag =
+                  def.id === 9
+                    ? `احتساب عكسي · ${toEnglishDigits(String(comp.effectiveRatePercent))}%`
+                    : def.vatDirectInput || isTotalRow
+                    ? def.rateLabel
+                    : comp.taxMethod === 'zero'
+                    ? 'أثر ضريبي صفري (0%)'
+                    : `نسبة ${toEnglishDigits(String(comp.effectiveRatePercent))}%`;
+
+                const dirHint =
+                  def.id === 9
+                    ? 'غير قابل للخصم'
+                    : comp.adjustmentDirection === 'subtract'
+                    ? '− يُطرح من المبلغ'
+                    : '+ يُضاف إلى المبلغ';
 
                 return (
                   <tr
@@ -570,8 +720,8 @@ export const Vat3AView: React.FC = () => {
                       lineId === 16
                         ? 'bg-emerald-50/70 dark:bg-emerald-950/35 font-bold'
                         : isTotalRow
-                        ? 'bg-slate-50/90 dark:bg-slate-800/50 font-semibold'
-                        : 'hover:bg-slate-50/50 dark:hover:bg-slate-800/20'
+                        ? 'bg-slate-50/90 dark:bg-white/[0.04] font-semibold'
+                        : 'hover:bg-slate-50/50 dark:hover:bg-white/[0.02]'
                     }
                   >
                     <td className="py-2.5 px-4 align-top">
@@ -581,8 +731,8 @@ export const Vat3AView: React.FC = () => {
                         </span>
                         <div>
                           <div className="text-slate-900 dark:text-slate-100">{def.name}</div>
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                            {def.rateLabel}
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono-tabular">
+                            {ruleTag}
                           </div>
                           {comp.warning && (
                             <div className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
@@ -606,10 +756,10 @@ export const Vat3AView: React.FC = () => {
                               handleLineChange(lineId, 'amountRaw', e.target.value)
                             }
                             placeholder="0.00"
-                            className={`w-full rounded-lg border px-2.5 py-1.5 text-left font-mono-tabular text-sm bg-white dark:bg-slate-950 text-slate-900 dark:text-white disabled:opacity-60 ${
+                            className={`w-full rounded-lg border px-2.5 py-1.5 text-left font-mono-tabular text-sm bg-white dark:bg-[#0e1015] text-slate-900 dark:text-white disabled:opacity-60 ${
                               comp.amountError
                                 ? 'border-rose-500 focus:ring-rose-500'
-                                : 'border-slate-300 dark:border-slate-600 focus:ring-emerald-500'
+                                : 'border-slate-300 dark:border-white/15 focus:ring-emerald-500'
                             }`}
                           />
                           {comp.amountError && (
@@ -621,33 +771,47 @@ export const Vat3AView: React.FC = () => {
                       ) : def.vatDirectInput ? (
                         <div className="py-1.5 px-2 text-slate-400 text-xs">—</div>
                       ) : (
-                        <div className="py-1.5 px-2.5 rounded-lg bg-slate-100/90 dark:bg-slate-900/70 text-slate-700 dark:text-slate-200 font-mono-tabular text-left" dir="ltr">
+                        <div
+                          className="py-1.5 px-2.5 rounded-lg bg-slate-100/90 dark:bg-[#14161b] text-slate-700 dark:text-slate-200 font-mono-tabular text-left"
+                          dir="ltr"
+                        >
                           {formatHalalas(comp.amountHalalas)}
                         </div>
                       )}
                     </td>
 
-                    {/* Adjustment Column */}
+                    {/* Adjustment Column with explicit direction indicator */}
                     <td className="py-2 px-3 align-top">
                       {def.adjustmentEditable ? (
                         <div>
-                          <input
-                            type="text"
-                            dir="ltr"
-                            disabled={isArchived}
-                            value={raw.adjustmentRaw}
-                            onChange={(e) =>
-                              handleLineChange(lineId, 'adjustmentRaw', e.target.value)
-                            }
-                            placeholder={lineId === 9 ? 'غير قابل للخصم' : '0.00'}
-                            className={`w-full rounded-lg border px-2.5 py-1.5 text-left font-mono-tabular text-sm bg-white dark:bg-slate-950 text-slate-900 dark:text-white disabled:opacity-60 ${
-                              comp.adjustmentError
-                                ? 'border-rose-500 focus:ring-rose-500'
-                                : 'border-slate-300 dark:border-slate-600 focus:ring-emerald-500'
+                          <div className="relative">
+                            <input
+                              type="text"
+                              dir="ltr"
+                              disabled={isArchived}
+                              value={raw.adjustmentRaw}
+                              onChange={(e) =>
+                                handleLineChange(lineId, 'adjustmentRaw', e.target.value)
+                              }
+                              placeholder={lineId === 9 ? 'غير قابل للخصم' : '0.00'}
+                              className={`w-full rounded-lg border px-2.5 py-1.5 text-left font-mono-tabular text-sm bg-white dark:bg-[#0e1015] text-slate-900 dark:text-white disabled:opacity-60 ${
+                                comp.adjustmentError
+                                  ? 'border-rose-500 focus:ring-rose-500'
+                                  : 'border-slate-300 dark:border-white/15 focus:ring-emerald-500'
+                              }`}
+                            />
+                          </div>
+                          <div
+                            className={`text-[10px] mt-1 font-semibold ${
+                              comp.adjustmentDirection === 'subtract'
+                                ? 'text-amber-700 dark:text-amber-300'
+                                : 'text-slate-500 dark:text-slate-400'
                             }`}
-                          />
+                          >
+                            {dirHint}
+                          </div>
                           {comp.adjustmentError && (
-                            <p className="text-[11px] text-rose-600 dark:text-rose-400 mt-1">
+                            <p className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">
                               {comp.adjustmentError}
                             </p>
                           )}
@@ -655,7 +819,10 @@ export const Vat3AView: React.FC = () => {
                       ) : def.vatDirectInput ? (
                         <div className="py-1.5 px-2 text-slate-400 text-xs">—</div>
                       ) : (
-                        <div className="py-1.5 px-2.5 rounded-lg bg-slate-100/90 dark:bg-slate-900/70 text-slate-700 dark:text-slate-200 font-mono-tabular text-left" dir="ltr">
+                        <div
+                          className="py-1.5 px-2.5 rounded-lg bg-slate-100/90 dark:bg-[#14161b] text-slate-700 dark:text-slate-200 font-mono-tabular text-left"
+                          dir="ltr"
+                        >
                           {formatHalalas(comp.adjustmentHalalas)}
                         </div>
                       )}
@@ -674,10 +841,10 @@ export const Vat3AView: React.FC = () => {
                               handleLineChange(lineId, 'amountRaw', e.target.value)
                             }
                             placeholder="0.00"
-                            className={`w-full rounded-lg border px-2.5 py-1.5 text-left font-mono-tabular text-sm bg-white dark:bg-slate-950 text-slate-900 dark:text-white disabled:opacity-60 ${
+                            className={`w-full rounded-lg border px-2.5 py-1.5 text-left font-mono-tabular text-sm bg-white dark:bg-[#0e1015] text-slate-900 dark:text-white disabled:opacity-60 ${
                               comp.vatInputError
                                 ? 'border-rose-500 focus:ring-rose-500'
-                                : 'border-slate-300 dark:border-slate-600 focus:ring-emerald-500'
+                                : 'border-slate-300 dark:border-white/15 focus:ring-emerald-500'
                             }`}
                           />
                           {comp.vatInputError && (
@@ -692,7 +859,7 @@ export const Vat3AView: React.FC = () => {
                           className={`py-1.5 px-2.5 rounded-lg font-mono-tabular text-left ${
                             lineId === 16
                               ? 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-900 dark:text-emerald-100 font-bold'
-                              : 'bg-slate-100/90 dark:bg-slate-900/70 text-slate-800 dark:text-slate-100'
+                              : 'bg-slate-100/90 dark:bg-[#14161b] text-slate-800 dark:text-slate-100'
                           }`}
                         >
                           {lineId === 16 && !evalResult.isValid
@@ -709,7 +876,7 @@ export const Vat3AView: React.FC = () => {
         </table>
       </div>
 
-      {/* MOBILE FULL-EDIT COLLAPSIBLE CARDS (Approved by project owner) */}
+      {/* MOBILE FULL-EDIT COLLAPSIBLE CARDS */}
       <div className="md:hidden space-y-2.5">
         <div className="flex items-center justify-between">
           <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -718,7 +885,7 @@ export const Vat3AView: React.FC = () => {
           <button
             type="button"
             onClick={toggleAllMobileLines}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium"
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/15 text-xs font-medium"
           >
             {allMobileExpanded ? (
               <>
@@ -745,6 +912,12 @@ export const Vat3AView: React.FC = () => {
               comp.adjustmentError ||
               comp.vatInputError
             );
+            const dirHint =
+              def.id === 9
+                ? 'غير قابل للخصم'
+                : comp.adjustmentDirection === 'subtract'
+                ? '− يُطرح من المبلغ'
+                : '+ يُضاف إلى المبلغ';
 
             return (
               <div
@@ -787,11 +960,14 @@ export const Vat3AView: React.FC = () => {
                 </button>
 
                 {expanded && (
-                  <div className="px-3.5 pb-3.5 pt-1 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
+                  <div className="px-3.5 pb-3.5 pt-1 border-t border-slate-100 dark:border-white/10 space-y-2.5">
                     {def.amountEditable && (
                       <div>
                         <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                          المبلغ (ر.س)
+                          المبلغ (ر.س) —{' '}
+                          {comp.taxMethod === 'zero'
+                            ? 'أثر صفري'
+                            : `${toEnglishDigits(String(comp.effectiveRatePercent))}%`}
                         </label>
                         <input
                           type="text"
@@ -802,7 +978,7 @@ export const Vat3AView: React.FC = () => {
                             handleLineChange(lineId, 'amountRaw', e.target.value)
                           }
                           placeholder="0.00"
-                          className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-left font-mono-tabular text-sm"
+                          className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-3 py-2 text-left font-mono-tabular text-sm"
                         />
                         {comp.amountError && (
                           <p className="text-[11px] text-rose-600 mt-1">{comp.amountError}</p>
@@ -812,9 +988,20 @@ export const Vat3AView: React.FC = () => {
 
                     {def.adjustmentEditable && (
                       <div>
-                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                          التعديل (ر.س)
-                        </label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                            التعديل (ر.س)
+                          </label>
+                          <span
+                            className={`text-[10px] font-semibold ${
+                              comp.adjustmentDirection === 'subtract'
+                                ? 'text-amber-700 dark:text-amber-300'
+                                : 'text-slate-500 dark:text-slate-400'
+                            }`}
+                          >
+                            {dirHint}
+                          </span>
+                        </div>
                         <input
                           type="text"
                           dir="ltr"
@@ -824,7 +1011,7 @@ export const Vat3AView: React.FC = () => {
                             handleLineChange(lineId, 'adjustmentRaw', e.target.value)
                           }
                           placeholder={lineId === 9 ? 'غير قابل للخصم' : '0.00'}
-                          className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-left font-mono-tabular text-sm"
+                          className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-3 py-2 text-left font-mono-tabular text-sm"
                         />
                         {comp.adjustmentError && (
                           <p className="text-[11px] text-rose-600 mt-1">
@@ -848,7 +1035,7 @@ export const Vat3AView: React.FC = () => {
                             handleLineChange(lineId, 'amountRaw', e.target.value)
                           }
                           placeholder="0.00"
-                          className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-left font-mono-tabular text-sm"
+                          className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-3 py-2 text-left font-mono-tabular text-sm"
                         />
                         {comp.vatInputError && (
                           <p className="text-[11px] text-rose-600 mt-1">
@@ -857,7 +1044,7 @@ export const Vat3AView: React.FC = () => {
                         )}
                       </div>
                     ) : (
-                      <div className="flex items-center justify-between text-xs bg-slate-50 dark:bg-slate-900/70 rounded-lg px-3 py-2">
+                      <div className="flex items-center justify-between text-xs bg-slate-50 dark:bg-[#14161b] rounded-lg px-3 py-2">
                         <span className="text-slate-500 dark:text-slate-400">
                           الضريبة المحسوبة (للقراءة فقط):
                         </span>
@@ -880,7 +1067,7 @@ export const Vat3AView: React.FC = () => {
         )}
       </div>
 
-      {/* Conditional Review Fields (Item 14 & Negative Base) + Net Summary */}
+      {/* Conditional Review Fields + Net Summary */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <div className="lg:col-span-7 glass-panel rounded-xl p-4 space-y-3">
           <h2 className="text-sm font-bold text-slate-900 dark:text-white">
@@ -888,7 +1075,7 @@ export const Vat3AView: React.FC = () => {
           </h2>
 
           {evalResult.needsItem14Details && (
-            <div className="space-y-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700">
+            <div className="space-y-2.5 p-3 rounded-xl bg-slate-50 dark:bg-[#14161b] border border-slate-200 dark:border-white/10">
               <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
                 بيانات تصحيح الفترات السابقة (البند 14) *
               </div>
@@ -910,7 +1097,7 @@ export const Vat3AView: React.FC = () => {
                       setDraft({ ...draft, item14PeriodRef: e.target.value })
                     }
                     placeholder="مثال: الربع الثاني 2026"
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-1.5 text-xs"
+                    className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-3 py-1.5 text-xs"
                   />
                 </div>
                 <div>
@@ -925,7 +1112,7 @@ export const Vat3AView: React.FC = () => {
                       setDraft({ ...draft, item14Reason: e.target.value })
                     }
                     placeholder="توضيح سبب التصحيح..."
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-1.5 text-xs"
+                    className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-3 py-1.5 text-xs"
                   />
                 </div>
               </div>
@@ -944,8 +1131,8 @@ export const Vat3AView: React.FC = () => {
                 onChange={(e) =>
                   setDraft({ ...draft, negativeBaseExplanation: e.target.value })
                 }
-                placeholder="سبب تجاوز التعديل السالب للمبلغ..."
-                className="w-full rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-950 px-3 py-1.5 text-xs"
+                placeholder="سبب تجاوز التعديل للمبلغ..."
+                className="w-full rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-[#0e1015] px-3 py-1.5 text-xs"
               />
             </div>
           )}
@@ -979,7 +1166,7 @@ export const Vat3AView: React.FC = () => {
             </div>
           </div>
 
-          <div className="pt-3 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2">
+          <div className="pt-3 border-t border-slate-200 dark:border-white/10 flex items-center justify-between gap-2">
             <div>
               <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
                 16. صافي الضريبة
@@ -1009,14 +1196,14 @@ export const Vat3AView: React.FC = () => {
         </div>
       </div>
 
-      {/* Saved Drafts & Archive */}
+      {/* Saved Drafts & Archive with Share/Print/Download + Filtered Export */}
       <div className="glass-panel rounded-xl overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setArchiveOpen(!archiveOpen)}
-          className="w-full px-4 py-3 flex items-center justify-between border-b border-slate-200 dark:border-slate-800 text-right"
-        >
-          <div className="flex items-center gap-2">
+        <div className="px-4 py-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-white/10">
+          <button
+            type="button"
+            onClick={() => setArchiveOpen(!archiveOpen)}
+            className="flex items-center gap-2 text-right"
+          >
             {archiveOpen ? (
               <ChevronDown className="w-4 h-4 text-slate-400" />
             ) : (
@@ -1024,10 +1211,38 @@ export const Vat3AView: React.FC = () => {
             )}
             <FolderOpen className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
             <span className="text-sm font-bold text-slate-900 dark:text-white">
-              المسودات المحفوظة والأرشيف ({filteredArchive.length})
+              المسودات المحفوظة والأرشيف (
+              <span className="font-mono-tabular">{filteredArchive.length}</span>)
             </span>
+          </button>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={filteredArchive.length === 0}
+              onClick={() => {
+                downloadVat3AArchiveExcel(filteredArchive);
+                showToast('تم تصدير الأرشيف المفلتر إلى Excel.');
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/15 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-50"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
+              <span>تصدير الأرشيف Excel</span>
+            </button>
+            <button
+              type="button"
+              disabled={filteredArchive.length === 0}
+              onClick={() => {
+                downloadVat3AArchivePdf(filteredArchive);
+                showToast('تم تصدير الأرشيف المفلتر إلى PDF.');
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/15 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-50"
+            >
+              <Download className="w-3.5 h-3.5 text-rose-500" />
+              <span>تصدير الأرشيف PDF</span>
+            </button>
           </div>
-        </button>
+        </div>
 
         {archiveOpen && (
           <div className="p-4 space-y-3">
@@ -1036,13 +1251,13 @@ export const Vat3AView: React.FC = () => {
                 type="search"
                 value={archiveFilters.search}
                 onChange={(e) => updateVatArchiveFilters({ search: e.target.value })}
-                placeholder="بحث بالمنشأة أو الرقم الضريبي..."
-                className="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                placeholder="بحث فوري بالمنشأة أو الرقم الضريبي أو الفترة..."
+                className="h-9 px-3 rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] text-xs"
               />
               <select
                 value={archiveFilters.entityName}
                 onChange={(e) => updateVatArchiveFilters({ entityName: e.target.value })}
-                className="h-9 px-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                className="h-9 px-2.5 rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] text-xs"
               >
                 <option value="الكل">المنشأة: الكل</option>
                 {entityNames.map((n) => (
@@ -1058,7 +1273,7 @@ export const Vat3AView: React.FC = () => {
                     status: e.target.value as 'الكل' | Vat3ADraftStatus,
                   })
                 }
-                className="h-9 px-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                className="h-9 px-2.5 rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] text-xs"
               >
                 <option value="الكل">الحالة: الكل</option>
                 <option value="مسودة">مسودة</option>
@@ -1067,7 +1282,7 @@ export const Vat3AView: React.FC = () => {
               </select>
             </div>
 
-            <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
+            <div className="divide-y divide-slate-100 dark:divide-white/10">
               {filteredArchive.map((item) => (
                 <div
                   key={item.id}
@@ -1081,18 +1296,18 @@ export const Vat3AView: React.FC = () => {
                     >
                       {item.entityName}
                     </button>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap gap-x-2 mt-0.5">
+                    <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap gap-x-2 mt-0.5 font-mono-tabular">
                       <span>
                         الفترة: {formatDisplayDate(item.periodStart, showHijri)} ←{' '}
                         {formatDisplayDate(item.periodEnd, showHijri)}
                       </span>
                       <span>·</span>
-                      <span dir="ltr" className="font-mono-tabular font-semibold">
+                      <span dir="ltr" className="font-semibold">
                         الصافي: {formatHalalas(item.computedNetHalalas)} ر.س
                       </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <StatusBadge
                       label={item.status}
                       tone={item.status === 'مؤرشفة' ? 'neutral' : 'success'}
@@ -1100,9 +1315,47 @@ export const Vat3AView: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => handleOpenSavedDraft(item)}
-                      className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium hover:bg-slate-100 dark:hover:bg-slate-800"
+                      className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-white/15 text-xs font-medium hover:bg-slate-100 dark:hover:bg-white/10"
                     >
                       فتح
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleShareDraft(item)}
+                      className="p-1.5 rounded-lg border border-slate-200 dark:border-white/15 text-xs text-blue-600 dark:text-blue-400 hover:bg-slate-100 dark:hover:bg-white/10"
+                      title="مشاركة"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePrintDraft(item)}
+                      className="p-1.5 rounded-lg border border-slate-200 dark:border-white/15 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10"
+                      title="طباعة"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        downloadVat3APdf(item);
+                        showToast('تم تحميل PDF للسجل.');
+                      }}
+                      className="px-2 py-1 rounded-lg border border-slate-200 dark:border-white/15 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:bg-slate-100 dark:hover:bg-white/10"
+                      title="تحميل PDF"
+                    >
+                      PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        downloadVat3AExcel(item);
+                        showToast('تم تحميل Excel للسجل.');
+                      }}
+                      className="px-2 py-1 rounded-lg border border-slate-200 dark:border-white/15 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-slate-100 dark:hover:bg-white/10"
+                      title="تحميل Excel"
+                    >
+                      Excel
                     </button>
                   </div>
                 </div>
@@ -1112,9 +1365,67 @@ export const Vat3AView: React.FC = () => {
         )}
       </div>
 
+      {/* Printable A4 Sheet (hidden on screen, shown in @media print) */}
+      <div id="vat3a-print-sheet" className="hidden print:block text-black bg-white p-6">
+        <div className="border-b-2 border-emerald-700 pb-3 mb-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold">حقيبة المهام — نموذج ضريبة القيمة المضافة 3A</h2>
+            <p className="text-xs text-slate-600">
+              مسودة للمراجعة الداخلية · إصدار القواعد: {activePrintDraft.calcRulesVersion}
+            </p>
+          </div>
+          <div className="text-xs font-mono-tabular text-left">
+            <div>المنشأة: {activePrintDraft.entityName}</div>
+            <div>الرقم الضريبي: {activePrintDraft.taxRegistrationNumber || '—'}</div>
+            <div>
+              الفترة: {activePrintDraft.periodStart} ← {activePrintDraft.periodEnd}
+            </div>
+          </div>
+        </div>
+
+        <table className="w-full border-collapse text-xs">
+          <thead>
+            <tr className="bg-slate-100 border border-slate-300">
+              <th className="p-2 text-right border border-slate-300">البند</th>
+              <th className="p-2 text-left border border-slate-300">المبلغ (ر.س)</th>
+              <th className="p-2 text-left border border-slate-300">التعديل (ر.س)</th>
+              <th className="p-2 text-left border border-slate-300">الضريبة (ر.س)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {VAT_3A_LINE_DEFINITIONS.map((def) => {
+              const line = activePrintEval.lines[def.id];
+              return (
+                <tr key={`pr-${def.id}`} className="border border-slate-300">
+                  <td className="p-1.5 border border-slate-300">
+                    {def.id}. {def.name}
+                  </td>
+                  <td className="p-1.5 text-left font-mono-tabular border border-slate-300" dir="ltr">
+                    {def.vatDirectInput ? '—' : formatHalalas(line.amountHalalas)}
+                  </td>
+                  <td className="p-1.5 text-left font-mono-tabular border border-slate-300" dir="ltr">
+                    {def.vatDirectInput ? '—' : formatHalalas(line.adjustmentHalalas)}
+                  </td>
+                  <td className="p-1.5 text-left font-mono-tabular font-bold border border-slate-300" dir="ltr">
+                    {formatHalalas(line.vatHalalas)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        <div className="mt-4 pt-3 border-t border-slate-300 flex items-center justify-between text-sm font-bold">
+          <span>الحالة: {activePrintEval.netStatusLabel}</span>
+          <span dir="ltr" className="font-mono-tabular">
+            {formatHalalas(activePrintEval.v16Halalas)} ر.س
+          </span>
+        </div>
+      </div>
+
       {/* Copy to New Period Modal */}
       {copyModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
           <form
             onSubmit={handleCopyToNewPeriod}
             className="glass-panel max-w-md w-full rounded-2xl p-5 space-y-4"
@@ -1123,25 +1434,29 @@ export const Vat3AView: React.FC = () => {
               نسخ النموذج لفترة جديدة
             </h3>
             <p className="text-xs text-slate-600 dark:text-slate-300">
-              سيُنسخ النموذج مع إعادة البندين 14 (التصحيحات) و15 (الرصيد المرحّل) إلى الصفر لمراجعتهما.
+              سيُنسخ النموذج وفق إعدادات 3A الحالية مع إعادة البندين 14 و15 إلى الصفر لمراجعتهما.
             </p>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold mb-1">بداية الفترة الجديدة</label>
                 <input
                   type="date"
+                  lang="en"
+                  dir="ltr"
                   value={copyStart}
                   onChange={(e) => setCopyStart(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-xs"
+                  className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-xs font-mono-tabular"
                 />
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-1">نهاية الفترة الجديدة</label>
                 <input
                   type="date"
+                  lang="en"
+                  dir="ltr"
                   value={copyEnd}
                   onChange={(e) => setCopyEnd(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-xs"
+                  className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-xs font-mono-tabular"
                 />
               </div>
             </div>
@@ -1166,7 +1481,7 @@ export const Vat3AView: React.FC = () => {
 
       {/* Delete Confirmation */}
       {deleteConfirmId && deleteImpact && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
           <div className="glass-panel max-w-md w-full rounded-2xl p-5 space-y-4">
             <h3 className="text-base font-bold text-rose-700 dark:text-rose-300">
               تأكيد حذف المسودة الضريبية
@@ -1183,7 +1498,7 @@ export const Vat3AView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setDeleteConfirmId(null)}
-                className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-medium"
+                className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-medium"
               >
                 تراجع
               </button>

@@ -9,6 +9,7 @@ import { CasesPoasView } from './components/CasesPoasView';
 import { DocumentsView } from './components/DocumentsView';
 import { Layout } from './components/Layout';
 import { RecordDrawer } from './components/RecordDrawer';
+import { ReportsView } from './components/ReportsView';
 import { SettingsView } from './components/SettingsView';
 import { ShareModal } from './components/ShareModal';
 import { SpecialistsView } from './components/SpecialistsView';
@@ -28,6 +29,7 @@ const MainRouter: React.FC = () => {
       {activeNav === 'documents' && <DocumentsView />}
       {activeNav === 'cases' && <CasesPoasView />}
       {activeNav === 'calendar' && <CalendarView />}
+      {activeNav === 'reports' && <ReportsView />}
       {activeNav === 'specialists' && <SpecialistsView />}
       {activeNav === 'vat3a' && <Vat3AView />}
       {activeNav === 'settings' && <SettingsView />}
