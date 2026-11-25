@@ -118,6 +118,14 @@ export const Vat3AView: React.FC = () => {
     return currentStr !== snapStr;
   }, [db.preferences.vat3aRules, evalResult.appliedRules]);
 
+  const previewUnderCurrentSettings = useMemo(() => {
+    if (!isRulesOutOfSync) return null;
+    return evaluateVat3ADraft({
+      ...draft,
+      rulesSnapshot: db.preferences.vat3aRules,
+    });
+  }, [isRulesOutOfSync, draft, db.preferences.vat3aRules]);
+
   const isArchived = draft.status === 'مؤرشفة';
   const showHijri = db.preferences.showHijri;
   const archiveFilters = db.preferences.vatArchiveFilters;
@@ -500,12 +508,31 @@ export const Vat3AView: React.FC = () => {
         <strong>تنبيه المعاينة:</strong> هذه الشاشة مسودة للمعاينة والمراجعة الداخلية، ولا تُغني عن مطابقة المعادلات مع نموذج هيئة الزكاة والضريبة والجمارك ومراجعة المحاسب قبل الاعتماد الرسمي.
       </div>
 
-      {/* Rules Snapshot Sync Banner */}
-      {isRulesOutOfSync && (
-        <div className="rounded-xl border border-blue-300 dark:border-blue-500/40 bg-blue-50/80 dark:bg-blue-950/35 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs text-blue-900 dark:text-blue-200">
-          <span>
-            تعتمد هذه المسودة قواعدها المحفوظة وقت إنشائها لحماية نتائجها من التغيّر التلقائي. إذا أردت تطبيق إعدادات «قواعد حساب 3A» الحالية عليها، اختر إعادة الاحتساب:
-          </span>
+      {/* Rules Snapshot Sync Banner with Preview Before Saving */}
+      {isRulesOutOfSync && previewUnderCurrentSettings && (
+        <div className="rounded-xl border border-blue-300 dark:border-blue-500/40 bg-blue-50/80 dark:bg-blue-950/35 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs text-blue-900 dark:text-blue-200">
+          <div className="space-y-1">
+            <div>
+              تعتمد هذه المسودة قواعدها المحفوظة وقت إنشائها (النسبة العامة:{' '}
+              <span className="font-mono-tabular font-bold">
+                {toEnglishDigits(String(evalResult.appliedRules.defaultRatePercent))}%
+              </span>
+              ) لحماية نتائجها من التغيّر التلقائي.
+            </div>
+            <div className="font-mono-tabular text-[11px] text-blue-800 dark:text-blue-300 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>
+                النتيجة الحالية للمسودة:{' '}
+                <strong dir="ltr">{formatHalalas(evalResult.v16Halalas)} ر.س</strong>
+              </span>
+              <span>·</span>
+              <span>
+                معاينة النتيجة بالإعدادات الحالية ({toEnglishDigits(String(db.preferences.vat3aRules.defaultRatePercent))}%):{' '}
+                <strong dir="ltr">
+                  {formatHalalas(previewUnderCurrentSettings.v16Halalas)} ر.س
+                </strong>
+              </span>
+            </div>
+          </div>
           {!isArchived && (
             <button
               type="button"
@@ -513,7 +540,7 @@ export const Vat3AView: React.FC = () => {
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-semibold whitespace-nowrap"
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              <span>إعادة الاحتساب وفق الإعدادات الحالية</span>
+              <span>تطبيق الإعدادات الحالية</span>
             </button>
           )}
         </div>
@@ -700,7 +727,9 @@ export const Vat3AView: React.FC = () => {
                 const isTotalRow = !!def.isTotal;
                 const ruleTag =
                   def.id === 9
-                    ? `احتساب عكسي · ${toEnglishDigits(String(comp.effectiveRatePercent))}%`
+                    ? comp.taxMethod === 'zero'
+                      ? 'احتساب عكسي · أثر ضريبي صفري (0%)'
+                      : `احتساب عكسي · ${toEnglishDigits(String(comp.effectiveRatePercent))}%`
                     : def.vatDirectInput || isTotalRow
                     ? def.rateLabel
                     : comp.taxMethod === 'zero'
@@ -709,7 +738,7 @@ export const Vat3AView: React.FC = () => {
 
                 const dirHint =
                   def.id === 9
-                    ? 'غير قابل للخصم'
+                    ? 'الجزء غير القابل للخصم'
                     : comp.adjustmentDirection === 'subtract'
                     ? '− يُطرح من المبلغ'
                     : '+ يُضاف إلى المبلغ';
@@ -794,7 +823,7 @@ export const Vat3AView: React.FC = () => {
                               onChange={(e) =>
                                 handleLineChange(lineId, 'adjustmentRaw', e.target.value)
                               }
-                              placeholder={lineId === 9 ? 'غير قابل للخصم' : '0.00'}
+                              placeholder={lineId === 9 ? 'الجزء غير القابل للخصم' : '0.00'}
                               className={`w-full rounded-lg border px-2.5 py-1.5 text-left font-mono-tabular text-sm bg-white dark:bg-[#0e1015] text-slate-900 dark:text-white disabled:opacity-60 ${
                                 comp.adjustmentError
                                   ? 'border-rose-500 focus:ring-rose-500'
@@ -915,7 +944,7 @@ export const Vat3AView: React.FC = () => {
             );
             const dirHint =
               def.id === 9
-                ? 'غير قابل للخصم'
+                ? 'الجزء غير القابل للخصم'
                 : comp.adjustmentDirection === 'subtract'
                 ? '− يُطرح من المبلغ'
                 : '+ يُضاف إلى المبلغ';
@@ -967,7 +996,7 @@ export const Vat3AView: React.FC = () => {
                         <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
                           المبلغ (ر.س) —{' '}
                           {comp.taxMethod === 'zero'
-                            ? 'أثر صفري'
+                            ? 'أثر ضريبي صفري (0%)'
                             : `${toEnglishDigits(String(comp.effectiveRatePercent))}%`}
                         </label>
                         <input
@@ -991,7 +1020,7 @@ export const Vat3AView: React.FC = () => {
                       <div>
                         <div className="flex items-center justify-between mb-1">
                           <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
-                            التعديل (ر.س)
+                            {lineId === 9 ? 'الجزء غير القابل للخصم (ر.س)' : 'التعديل (ر.س)'}
                           </label>
                           <span
                             className={`text-[10px] font-semibold ${
@@ -1011,7 +1040,7 @@ export const Vat3AView: React.FC = () => {
                           onChange={(e) =>
                             handleLineChange(lineId, 'adjustmentRaw', e.target.value)
                           }
-                          placeholder={lineId === 9 ? 'غير قابل للخصم' : '0.00'}
+                          placeholder={lineId === 9 ? 'الجزء غير القابل للخصم' : '0.00'}
                           className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-3 py-2 text-left font-mono-tabular text-sm"
                         />
                         {comp.adjustmentError && (
@@ -1396,10 +1425,25 @@ export const Vat3AView: React.FC = () => {
           <tbody>
             {VAT_3A_LINE_DEFINITIONS.map((def) => {
               const line = activePrintEval.lines[def.id];
+              const printRuleNote =
+                def.vatDirectInput || def.isTotal
+                  ? def.rateLabel
+                  : def.id === 9
+                  ? line.taxMethod === 'zero'
+                    ? 'احتساب عكسي · أثر ضريبي صفري (0%)'
+                    : `احتساب عكسي · ${toEnglishDigits(String(line.effectiveRatePercent))}%`
+                  : `${line.adjustmentDirection === 'subtract' ? 'طرح' : 'جمع'} · ${
+                      line.taxMethod === 'zero'
+                        ? 'أثر ضريبي صفري (0%)'
+                        : `${toEnglishDigits(String(line.effectiveRatePercent))}%`
+                    }`;
               return (
                 <tr key={`pr-${def.id}`} className="border border-slate-300">
                   <td className="p-1.5 border border-slate-300">
-                    {def.id}. {def.name}
+                    <div>
+                      {def.id}. {def.name}
+                    </div>
+                    <div className="text-[10px] text-slate-500">{printRuleNote}</div>
                   </td>
                   <td className="p-1.5 text-left font-mono-tabular border border-slate-300" dir="ltr">
                     {def.vatDirectInput ? '—' : formatHalalas(line.amountHalalas)}

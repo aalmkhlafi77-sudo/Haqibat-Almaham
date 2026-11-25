@@ -262,7 +262,7 @@ export const TasksView: React.FC = () => {
               return (
                 <div
                   key={task.id}
-                  className={`p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/35 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3 border border-transparent rounded-xl ${motionClass}`}
+                  className="p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/35 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3"
                 >
                   <div className="min-w-0 space-y-1 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -349,12 +349,14 @@ export const TasksView: React.FC = () => {
                         label={delay.label}
                         tone={delay.isOverdue ? 'danger' : 'warning'}
                         icon="alert"
+                        motionClass={delay.isOverdue ? motionClass : ''}
                       />
                     ) : urgent.isUrgentAlert && urgent.badgeText ? (
                       <StatusBadge
                         label={urgent.badgeText}
                         tone={urgent.kind === 'today' ? 'today' : 'warning'}
                         icon="clock"
+                        motionClass={motionClass}
                       />
                     ) : null}
                     <button

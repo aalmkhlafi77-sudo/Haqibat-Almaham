@@ -189,7 +189,7 @@ export const TodayView: React.FC = () => {
                   return (
                     <div
                       key={task.id}
-                      className={`py-2.5 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 border border-transparent rounded-xl ${motionClass}`}
+                      className="py-2.5 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl"
                     >
                       <div className="min-w-0 flex-1">
                         <button
@@ -207,7 +207,12 @@ export const TodayView: React.FC = () => {
                           <span>الموعد: {formatDisplayDate(task.dueDate, showHijri)}</span>
                         </div>
                       </div>
-                      <StatusBadge label={delay.label || 'متأخرة'} tone="danger" icon="alert" />
+                      <StatusBadge
+                        label={delay.label || 'متأخرة'}
+                        tone="danger"
+                        icon="alert"
+                        motionClass={motionClass}
+                      />
                     </div>
                   );
                 })}
@@ -243,7 +248,7 @@ export const TodayView: React.FC = () => {
                   return (
                     <div
                       key={task.id}
-                      className={`py-2.5 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 border border-transparent rounded-xl ${motionClass}`}
+                      className="py-2.5 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl"
                     >
                       <div className="min-w-0 flex-1">
                         <button
@@ -258,7 +263,12 @@ export const TodayView: React.FC = () => {
                           {getSpecialistName(task.specialistId)} · الأولوية: {task.priority}
                         </div>
                       </div>
-                      <StatusBadge label="تستحق اليوم" tone="info" icon="clock" />
+                      <StatusBadge
+                        label="تستحق اليوم"
+                        tone="info"
+                        icon="clock"
+                        motionClass={motionClass}
+                      />
                     </div>
                   );
                 })}
@@ -277,7 +287,7 @@ export const TodayView: React.FC = () => {
                   return (
                     <div
                       key={sess.id}
-                      className={`py-2.5 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 border border-transparent rounded-xl ${motionClass}`}
+                      className="py-2.5 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl"
                     >
                       <div className="min-w-0 flex-1">
                         <button
@@ -291,7 +301,12 @@ export const TodayView: React.FC = () => {
                           جلسة · {formatDateTime(sess.scheduledAt, showHijri)} · {getSpecialistName(sess.specialistId)}
                         </div>
                       </div>
-                      <StatusBadge label="جلسة اليوم" tone="purple" icon="gavel" />
+                      <StatusBadge
+                        label="جلسة اليوم"
+                        tone="purple"
+                        icon="gavel"
+                        motionClass={motionClass}
+                      />
                     </div>
                   );
                 })}
@@ -310,7 +325,7 @@ export const TodayView: React.FC = () => {
                   return (
                     <div
                       key={ci.id}
-                      className={`py-2.5 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 border border-transparent rounded-xl ${motionClass}`}
+                      className="py-2.5 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl"
                     >
                       <div className="min-w-0 flex-1">
                         <button
@@ -324,7 +339,12 @@ export const TodayView: React.FC = () => {
                           {ci.kind} · {formatDateTime(ci.scheduledAt, showHijri)} · {getSpecialistName(ci.specialistId)}
                         </div>
                       </div>
-                      <StatusBadge label={`${ci.kind} اليوم`} tone="purple" icon="clock" />
+                      <StatusBadge
+                        label={`${ci.kind} اليوم`}
+                        tone="purple"
+                        icon="clock"
+                        motionClass={motionClass}
+                      />
                     </div>
                   );
                 })}
@@ -377,7 +397,7 @@ export const TodayView: React.FC = () => {
                   return (
                     <div
                       key={doc.id}
-                      className={`py-2.5 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 border border-transparent rounded-xl ${motionClass}`}
+                      className="py-2.5 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl"
                     >
                       <div className="min-w-0 flex-1">
                         <button
@@ -408,6 +428,7 @@ export const TodayView: React.FC = () => {
                         label={health.badgeText}
                         tone={badgeTone}
                         icon={health.category === 'منتهية' ? 'alert' : 'clock'}
+                        motionClass={motionClass}
                       />
                     </div>
                   );
@@ -453,7 +474,7 @@ export const TodayView: React.FC = () => {
                     db.preferences.urgentAlertMotion
                   );
                   return (
-                    <div className={`glass-surface-subtle rounded-xl p-3.5 space-y-2 ${sessMotion}`}>
+                    <div className="glass-surface-subtle rounded-xl p-3.5 space-y-2">
                       <div className="flex items-start justify-between gap-2">
                         <button
                           type="button"
@@ -468,6 +489,7 @@ export const TodayView: React.FC = () => {
                               label={sessUrgent.badgeText}
                               tone={sessUrgent.kind === 'today' ? 'today' : 'warning'}
                               icon="clock"
+                              motionClass={sessMotion}
                             />
                           )}
                           <StatusBadge label={closestSession.status} tone="purple" icon="gavel" />

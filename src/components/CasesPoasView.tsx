@@ -252,7 +252,7 @@ export const CasesPoasView: React.FC = () => {
               return (
                 <div
                   key={s.id}
-                  className={`py-3 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 border border-transparent rounded-xl ${motionClass}`}
+                  className="py-3 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2"
                 >
                   <div className="min-w-0 flex-1">
                     <button
@@ -286,6 +286,7 @@ export const CasesPoasView: React.FC = () => {
                         label={urgent.badgeText}
                         tone={urgent.kind === 'today' ? 'today' : 'warning'}
                         icon="clock"
+                        motionClass={motionClass}
                       />
                     )}
                     <StatusBadge
@@ -348,7 +349,7 @@ export const CasesPoasView: React.FC = () => {
               return (
                 <div
                   key={p.id}
-                  className={`py-3 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 border border-transparent rounded-xl ${motionClass}`}
+                  className="py-3 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2"
                 >
                   <div className="min-w-0 flex-1">
                     <button
@@ -372,6 +373,7 @@ export const CasesPoasView: React.FC = () => {
                   <StatusBadge
                     label={ph.label}
                     tone={ph.isExpired ? 'danger' : ph.isUrgent ? 'warning' : 'success'}
+                    motionClass={motionClass}
                   />
                 </div>
               );

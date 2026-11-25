@@ -572,7 +572,7 @@ export const SettingsView: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl glass-surface-subtle">
           <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
-            النسبة الضريبية الافتراضية (%):
+            النسبة الضريبية العامة (%):
           </label>
           <input
             type="number"
@@ -591,7 +591,7 @@ export const SettingsView: React.FC = () => {
             className="w-24 rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2.5 py-1.5 text-sm font-mono-tabular text-center"
           />
           <span className="text-xs text-slate-500 dark:text-slate-400">
-            يُحتفظ البند 9 بمعاملته الخاصة للاحتساب العكسي كما في وثيقة 3A.
+            تبدأ النسبة العامة من 15% وتُستخدم للبنود التي لم تُحدَّد لها نسبة خاصة أو أثر صفري.
           </span>
         </div>
 
@@ -599,86 +599,147 @@ export const SettingsView: React.FC = () => {
           <table className="w-full text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50 dark:bg-[#14161b] border-b border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200">
-                <th className="text-right py-2.5 px-3">اسم البند</th>
-                <th className="text-right py-2.5 px-3">طريقة تطبيق التعديل</th>
-                <th className="text-right py-2.5 px-3">طريقة احتساب الضريبة</th>
-                <th className="text-right py-2.5 px-3">النسبة الفعلية (%)</th>
+                <th className="text-right py-2.5 px-3">البند</th>
+                <th className="text-right py-2.5 px-3">اتجاه التعديل</th>
+                <th className="text-right py-2.5 px-3">طريقة الضريبة</th>
+                <th className="text-right py-2.5 px-3">النسبة (عامة أو خاصة)</th>
+                <th className="text-right py-2.5 px-3">النسبة الفعلية</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-white/10">
               {CUSTOMIZABLE_VAT_LINE_IDS.map((lineId) => {
                 const def = VAT_3A_LINE_DEFINITIONS.find((d) => d.id === lineId)!;
+                const isReverseCharge = lineId === 9;
                 const rule = rules.lineRules[lineId] || {
-                  adjustmentDirection: 'add',
+                  adjustmentDirection: isReverseCharge ? 'subtract' : 'add',
                   taxMethod: 'rate',
                   customRatePercent: null,
                 };
                 const eff = getEffectiveLineRule(rules, lineId);
+                const usesCustomRate =
+                  rule.customRatePercent !== null &&
+                  rule.customRatePercent !== undefined &&
+                  !Number.isNaN(rule.customRatePercent);
 
                 return (
-                  <tr key={lineId} className="hover:bg-slate-50/70 dark:hover:bg-white/[0.02]">
+                  <tr
+                    key={lineId}
+                    className={
+                      isReverseCharge
+                        ? 'bg-emerald-50/40 dark:bg-emerald-950/20 hover:bg-emerald-50/70 dark:hover:bg-emerald-950/30'
+                        : 'hover:bg-slate-50/70 dark:hover:bg-white/[0.02]'
+                    }
+                  >
                     <td className="py-2.5 px-3 font-semibold text-slate-900 dark:text-slate-100">
                       <span className="font-mono-tabular text-emerald-600 dark:text-emerald-400 ml-1">
                         {lineId}.
                       </span>
                       {def.name}
+                      {isReverseCharge && (
+                        <span className="block text-[11px] font-normal text-emerald-700 dark:text-emerald-300 mt-0.5">
+                          الاحتساب العكسي · خانة التعديل: الجزء غير القابل للخصم
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2 px-3">
+                      {isReverseCharge ? (
+                        <div className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                          الجزء غير القابل للخصم (عكسي)
+                        </div>
+                      ) : (
+                        <select
+                          aria-label={`اتجاه التعديل للبند ${lineId}`}
+                          value={rule.adjustmentDirection}
+                          onChange={(e) =>
+                            updateLineRule(lineId, {
+                              adjustmentDirection: e.target.value as Vat3AAdjustmentDirection,
+                            })
+                          }
+                          className="w-full min-w-[140px] rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2 py-1.5 text-xs"
+                        >
+                          <option value="subtract">طرح (يُطرح من المبلغ)</option>
+                          <option value="add">جمع (يُضاف إلى المبلغ)</option>
+                        </select>
+                      )}
                     </td>
                     <td className="py-2 px-3">
                       <select
-                        value={rule.adjustmentDirection}
-                        onChange={(e) =>
-                          updateLineRule(lineId, {
-                            adjustmentDirection: e.target.value as Vat3AAdjustmentDirection,
-                          })
-                        }
-                        className="w-full min-w-[140px] rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2 py-1.5 text-xs"
-                      >
-                        <option value="subtract">يُطرح من المبلغ</option>
-                        <option value="add">يُضاف إلى المبلغ</option>
-                      </select>
-                    </td>
-                    <td className="py-2 px-3">
-                      <select
+                        aria-label={`طريقة الضريبة للبند ${lineId}`}
                         value={rule.taxMethod}
                         onChange={(e) =>
                           updateLineRule(lineId, {
                             taxMethod: e.target.value as Vat3ATaxMethod,
                           })
                         }
-                        className="w-full min-w-[165px] rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2 py-1.5 text-xs"
+                        className="w-full min-w-[170px] rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2 py-1.5 text-xs"
                       >
-                        <option value="rate">تُحسب بالنسبة المحددة</option>
+                        <option value="rate">
+                          {isReverseCharge
+                            ? 'احتساب عكسي بالنسبة المحددة'
+                            : 'احتساب بالنسبة المحددة'}
+                        </option>
                         <option value="zero">أثر ضريبي صفري</option>
                       </select>
                     </td>
                     <td className="py-2 px-3">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={0.5}
-                          dir="ltr"
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <select
+                          aria-label={`نوع النسبة للبند ${lineId}`}
                           disabled={rule.taxMethod === 'zero'}
-                          value={
-                            rule.taxMethod === 'zero'
-                              ? 0
-                              : rule.customRatePercent ?? ''
-                          }
-                          placeholder={toEnglishDigits(String(rules.defaultRatePercent))}
+                          value={usesCustomRate ? 'custom' : 'global'}
                           onChange={(e) => {
-                            const v = e.target.value;
+                            const mode = e.target.value;
                             updateLineRule(lineId, {
                               customRatePercent:
-                                v === '' ? null : Math.max(0, Math.min(100, Number(v))),
+                                mode === 'custom'
+                                  ? rule.customRatePercent ?? rules.defaultRatePercent
+                                  : null,
                             });
                           }}
-                          className="w-20 rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2 py-1 text-center font-mono-tabular text-xs disabled:opacity-50"
-                        />
-                        <span className="text-[11px] font-mono-tabular text-slate-500 dark:text-slate-400">
-                          الفعلي: {toEnglishDigits(String(eff.effectiveRatePercent))}%
-                        </span>
+                          className="rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2 py-1 text-xs disabled:opacity-50"
+                        >
+                          <option value="global">
+                            عامة ({toEnglishDigits(String(rules.defaultRatePercent))}%)
+                          </option>
+                          <option value="custom">خاصة بالبند</option>
+                        </select>
+                        {usesCustomRate && (
+                          <input
+                            type="number"
+                            aria-label={`النسبة الخاصة للبند ${lineId}`}
+                            min={0}
+                            max={100}
+                            step={0.5}
+                            dir="ltr"
+                            disabled={rule.taxMethod === 'zero'}
+                            value={rule.customRatePercent ?? ''}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              updateLineRule(lineId, {
+                                customRatePercent:
+                                  v === '' ? null : Math.max(0, Math.min(100, Number(v))),
+                              });
+                            }}
+                            className="w-20 rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2 py-1 text-center font-mono-tabular text-xs disabled:opacity-50"
+                          />
+                        )}
                       </div>
+                    </td>
+                    <td className="py-2 px-3 font-mono-tabular">
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded-md font-bold ${
+                          eff.taxMethod === 'zero'
+                            ? 'bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300'
+                            : 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300'
+                        }`}
+                      >
+                        {toEnglishDigits(String(eff.effectiveRatePercent))}%
+                      </span>
+                      {rule.taxMethod === 'zero' && usesCustomRate && (
+                        <span className="block text-[10px] text-slate-400 mt-0.5">
+                          محفوظة {toEnglishDigits(String(rule.customRatePercent))}% (معطّلة بالأثر الصفري)
+                        </span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -686,6 +747,10 @@ export const SettingsView: React.FC = () => {
             </tbody>
           </table>
         </div>
+
+        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+          ملاحظة: تبقى بنود الإجمالي (6، 12، 13، 16) للقراءة فقط، بينما يُدخَل البندان 14 (تصحيحات فترات سابقة) و15 (رصيد ضريبي مرحّل) مباشرة في حقليهما داخل النموذج.
+        </p>
       </div>
 
       {/* Server & AI Integration Settings (Keys remain server-side only) */}

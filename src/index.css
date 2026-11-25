@@ -92,63 +92,100 @@ html.dark .glass-surface-subtle {
   animation: labelAttentionPulse 2.2s ease-in-out infinite;
 }
 
-/* Urgent upcoming alerts (active records within 3 or 5 days) */
-@keyframes urgentGlowPulse {
+/* Badge-only urgent alert styles & tone glow tokens (never animate whole cards/rows) */
+.badge-tone-danger {
+  --badge-glow: rgba(225, 29, 72, 0.42);
+  --badge-glow-soft: rgba(225, 29, 72, 0.16);
+}
+.badge-tone-warning {
+  --badge-glow: rgba(217, 119, 6, 0.44);
+  --badge-glow-soft: rgba(217, 119, 6, 0.16);
+}
+.badge-tone-today {
+  --badge-glow: rgba(234, 88, 12, 0.48);
+  --badge-glow-soft: rgba(234, 88, 12, 0.18);
+}
+.badge-tone-info {
+  --badge-glow: rgba(37, 99, 235, 0.42);
+  --badge-glow-soft: rgba(37, 99, 235, 0.16);
+}
+.badge-tone-purple {
+  --badge-glow: rgba(124, 58, 237, 0.44);
+  --badge-glow-soft: rgba(124, 58, 237, 0.18);
+}
+.badge-tone-success,
+.badge-tone-gold,
+.badge-tone-neutral {
+  --badge-glow: rgba(100, 116, 139, 0.35);
+  --badge-glow-soft: rgba(100, 116, 139, 0.12);
+}
+
+@keyframes urgentBadgeGlowPulse {
   0%, 100% {
-    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.45), 0 0 10px rgba(245, 158, 11, 0.16);
+    transform: scale(1);
+    box-shadow: 0 0 0 1px var(--badge-glow, rgba(245, 158, 11, 0.42)),
+      0 0 8px var(--badge-glow-soft, rgba(245, 158, 11, 0.16));
   }
   50% {
-    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.55), 0 0 18px rgba(245, 158, 11, 0.34);
+    transform: scale(1.03);
+    box-shadow: 0 0 0 2px var(--badge-glow, rgba(245, 158, 11, 0.55)),
+      0 0 14px var(--badge-glow, rgba(245, 158, 11, 0.32));
   }
 }
 
-@keyframes urgentGlowShake5s {
+@keyframes urgentBadgeShake5s {
   0% {
     transform: translateX(0);
-    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.45), 0 0 8px rgba(245, 158, 11, 0.14);
+    box-shadow: 0 0 0 1px var(--badge-glow, rgba(245, 158, 11, 0.4)),
+      0 0 6px var(--badge-glow-soft, rgba(245, 158, 11, 0.14));
   }
-  4% {
-    transform: translateX(-2px);
-    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.55), 0 0 16px rgba(239, 68, 68, 0.28);
+  3% {
+    transform: translateX(-1.5px);
+    box-shadow: 0 0 0 2px var(--badge-glow, rgba(239, 68, 68, 0.52)),
+      0 0 12px var(--badge-glow, rgba(239, 68, 68, 0.28));
   }
-  8% {
-    transform: translateX(2px);
+  6% {
+    transform: translateX(1.5px);
+  }
+  9% {
+    transform: translateX(-1.5px);
   }
   12% {
-    transform: translateX(-2px);
+    transform: translateX(1.5px);
   }
-  16% {
-    transform: translateX(2px);
-    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.55), 0 0 16px rgba(245, 158, 11, 0.28);
-  }
-  20%, 100% {
+  15%, 100% {
     transform: translateX(0);
-    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.38), 0 0 8px rgba(245, 158, 11, 0.12);
+    box-shadow: 0 0 0 1px var(--badge-glow, rgba(245, 158, 11, 0.35)),
+      0 0 6px var(--badge-glow-soft, rgba(245, 158, 11, 0.12));
   }
 }
 
-.urgent-alert-continuous {
-  animation: urgentGlowPulse 2s ease-in-out infinite;
-  border-color: rgba(245, 158, 11, 0.65) !important;
+.urgent-badge-continuous {
+  animation: urgentBadgeGlowPulse 2.1s ease-in-out infinite;
+  will-change: transform, box-shadow;
 }
 
-.urgent-alert-repeat-5s {
-  animation: urgentGlowShake5s 5s ease-in-out infinite;
-  border-color: rgba(245, 158, 11, 0.65) !important;
+.urgent-badge-repeat-5s {
+  animation: urgentBadgeShake5s 5s ease-in-out infinite;
+  will-change: transform, box-shadow;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .heatmap-glow-dot,
   .label-attention-pulse,
-  .urgent-alert-continuous,
-  .urgent-alert-repeat-5s {
+  .urgent-badge-continuous,
+  .urgent-badge-repeat-5s {
     animation: none !important;
     transform: none !important;
     opacity: 1;
   }
 
-  .urgent-alert-continuous,
-  .urgent-alert-repeat-5s,
+  .urgent-badge-continuous,
+  .urgent-badge-repeat-5s {
+    box-shadow: 0 0 0 1.5px var(--badge-glow, rgba(245, 158, 11, 0.6)),
+      0 0 10px var(--badge-glow-soft, rgba(245, 158, 11, 0.22));
+  }
+
   .label-attention-pulse {
     box-shadow: 0 0 0 1.5px rgba(245, 158, 11, 0.65), 0 0 12px rgba(245, 158, 11, 0.22);
   }

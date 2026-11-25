@@ -11,7 +11,7 @@ import {
 export const VAT_3A_RULES_VERSION = '3A-v2.0-configurable';
 export const ITEM_14_REVIEW_THRESHOLD_HALALAS = 1_500_000; // 15,000.00 SAR
 
-export const CUSTOMIZABLE_VAT_LINE_IDS: Vat3ALineId[] = [1, 2, 3, 4, 5, 7, 8, 10, 11];
+export const CUSTOMIZABLE_VAT_LINE_IDS: Vat3ALineId[] = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11];
 
 export interface Vat3ALineDefinition {
   id: Vat3ALineId;
@@ -203,6 +203,7 @@ export function buildDefaultVat3ARulesConfig(): Vat3ARulesConfig {
       5: { adjustmentDirection: 'add', taxMethod: 'zero', customRatePercent: null },
       7: { adjustmentDirection: 'add', taxMethod: 'rate', customRatePercent: null },
       8: { adjustmentDirection: 'add', taxMethod: 'rate', customRatePercent: null },
+      9: { adjustmentDirection: 'subtract', taxMethod: 'rate', customRatePercent: null },
       10: { adjustmentDirection: 'add', taxMethod: 'zero', customRatePercent: null },
       11: { adjustmentDirection: 'add', taxMethod: 'zero', customRatePercent: null },
     },
@@ -226,29 +227,30 @@ export function getEffectiveLineRule(
   taxMethod: Vat3ATaxMethod;
   effectiveRatePercent: number;
 } {
-  if (lineId === 9) {
-    return {
-      adjustmentDirection: 'add',
-      taxMethod: 'rate',
-      effectiveRatePercent: rules.defaultRatePercent,
-    };
-  }
-  const fallback = buildDefaultVat3ARulesConfig().lineRules[lineId] || {
+  const defaults = buildDefaultVat3ARulesConfig().lineRules;
+  const fallback: Vat3ALineRuleConfig = defaults[lineId] || {
     adjustmentDirection: 'add',
     taxMethod: 'zero',
     customRatePercent: null,
   };
-  const r: Vat3ALineRuleConfig = rules.lineRules[lineId] || fallback;
+  const r: Vat3ALineRuleConfig = rules.lineRules?.[lineId] || fallback;
+  const taxMethod: Vat3ATaxMethod = r.taxMethod === 'zero' ? 'zero' : 'rate';
   const effectiveRatePercent =
-    r.taxMethod === 'zero'
+    taxMethod === 'zero'
       ? 0
-      : r.customRatePercent !== null && !Number.isNaN(r.customRatePercent)
+      : r.customRatePercent !== null &&
+        r.customRatePercent !== undefined &&
+        !Number.isNaN(r.customRatePercent)
       ? r.customRatePercent
       : rules.defaultRatePercent;
 
+  // Band 9 uses dedicated reverse-charge treatment (non-deductible portion), not general add/subtract
+  const adjustmentDirection: Vat3AAdjustmentDirection =
+    lineId === 9 ? 'subtract' : r.adjustmentDirection === 'subtract' ? 'subtract' : 'add';
+
   return {
-    adjustmentDirection: r.adjustmentDirection,
-    taxMethod: r.taxMethod,
+    adjustmentDirection,
+    taxMethod,
     effectiveRatePercent,
   };
 }
@@ -552,14 +554,19 @@ export function evaluateVat3ADraft(
     let vatHalalas = 0;
 
     if (def.id === 9) {
-      // Special Reverse Charge treatment from VAT 3A Doc
+      // Special Reverse Charge treatment from VAT 3A Doc: uses Band 9's own taxMethod & effectiveRatePercent
       netBase = aHal - dHal;
       if (parsedA.isValid && parsedD.isValid && dHal > aHal) {
         adjustmentError =
           'في الاحتساب العكسي يجب ألا يتجاوز التعديل (الجزء غير القابل للخصم) مبلغ البند.';
         errorsSummary.push(`البند 9: ${adjustmentError}`);
       } else if (parsedA.isValid && parsedD.isValid) {
-        vatHalalas = -calculateRateVatHalalas(dHal, appliedRules.defaultRatePercent);
+        if (effRule.taxMethod === 'zero' || effRule.effectiveRatePercent === 0 || dHal === 0) {
+          vatHalalas = 0;
+        } else {
+          const revVat = calculateRateVatHalalas(dHal, effRule.effectiveRatePercent);
+          vatHalalas = revVat === 0 ? 0 : -revVat;
+        }
         if (dHal > 0) {
           warning = 'خصم جزئي في الاحتساب العكسي: يُراجَع حق الخصم قبل الاعتماد.';
         }

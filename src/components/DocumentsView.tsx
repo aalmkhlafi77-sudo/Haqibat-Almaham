@@ -264,7 +264,7 @@ export const DocumentsView: React.FC = () => {
               return (
                 <div
                   key={doc.id}
-                  className={`p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/35 flex flex-col lg:flex-row lg:items-center justify-between gap-3 border border-transparent rounded-xl transition-colors ${motionClass}`}
+                  className="p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/35 flex flex-col lg:flex-row lg:items-center justify-between gap-3 transition-colors"
                 >
                   <div className="min-w-0 space-y-1 flex-1">
                     <button
@@ -317,6 +317,7 @@ export const DocumentsView: React.FC = () => {
                         label={urgent.badgeText}
                         tone="warning"
                         icon="clock"
+                        motionClass={motionClass}
                       />
                     )}
                     <StatusBadge
@@ -331,6 +332,7 @@ export const DocumentsView: React.FC = () => {
                           ? 'archive'
                           : 'clock'
                       }
+                      motionClass={health.category !== 'سارية' ? motionClass : ''}
                     />
                     <button
                       type="button"

@@ -260,7 +260,9 @@ export async function buildVat3APdfBlob(draft: Vat3ADraft): Promise<Blob> {
       : def.isTotal
       ? def.rateLabel
       : def.id === 9
-      ? `احتساب عكسي (${line.effectiveRatePercent}%)`
+      ? line.taxMethod === 'zero'
+        ? 'احتساب عكسي · أثر ضريبي صفري (0%)'
+        : `احتساب عكسي (${line.effectiveRatePercent}%)`
       : `${line.adjustmentDirection === 'subtract' ? 'التعديل يُطرح' : 'التعديل يُضاف'} · ${
           line.taxMethod === 'zero' ? 'أثر صفري' : `${line.effectiveRatePercent}%`
         }`;

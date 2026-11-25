@@ -359,7 +359,7 @@ export function getUrgentAlertMotionClass(
 ): string {
   if (!isUrgentAlert) return '';
   return motionMode === 'continuous'
-    ? 'urgent-alert-continuous'
-    : 'urgent-alert-repeat-5s';
+    ? 'urgent-badge-continuous'
+    : 'urgent-badge-repeat-5s';
 }
 

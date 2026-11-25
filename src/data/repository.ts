@@ -182,14 +182,28 @@ export function migrateDatabaseState(
   });
 
   // 3. VAT 3A drafts snapshot migration
+  const legacyDefaults = buildLegacyVat3ARulesSnapshot();
   const migratedVatDrafts: Vat3ADraft[] = (
     parsed.vat3aDrafts ?? fallback.vat3aDrafts
   ).map((d) => {
-    if (d.rulesSnapshot) return d;
-    const legacy = buildLegacyVat3ARulesSnapshot();
+    if (d.rulesSnapshot) {
+      if (!d.rulesSnapshot.lineRules?.[9]) {
+        return {
+          ...d,
+          rulesSnapshot: {
+            ...d.rulesSnapshot,
+            lineRules: {
+              ...legacyDefaults.lineRules,
+              ...(d.rulesSnapshot.lineRules || {}),
+            },
+          },
+        };
+      }
+      return d;
+    }
     const m: Vat3ADraft = {
       ...d,
-      rulesSnapshot: legacy,
+      rulesSnapshot: legacyDefaults,
     };
     m.computedNetHalalas = evaluateVat3ADraft(m).v16Halalas;
     return m;

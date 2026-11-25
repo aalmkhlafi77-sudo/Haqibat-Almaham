@@ -83,7 +83,8 @@ export const StatusBadge: React.FC<{
   label: string;
   tone: SemanticBadgeTone;
   icon?: 'alert' | 'clock' | 'check' | 'archive' | 'pause' | 'cancel' | 'gavel' | 'doc';
-}> = ({ label, tone, icon }) => {
+  motionClass?: string;
+}> = ({ label, tone, icon, motionClass = '' }) => {
   const renderIcon = () => {
     const cls = 'w-3.5 h-3.5 shrink-0';
     switch (icon) {
@@ -114,7 +115,7 @@ export const StatusBadge: React.FC<{
 
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium whitespace-nowrap shrink-0 ${BADGE_STYLES[tone]}`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium whitespace-nowrap shrink-0 badge-tone-${tone} ${BADGE_STYLES[tone]} ${motionClass}`}
     >
       {renderIcon()}
       <span>{label}</span>
