@@ -7,6 +7,7 @@ import React from 'react';
 import { CalendarView } from './components/CalendarView';
 import { CasesPoasView } from './components/CasesPoasView';
 import { DocumentsView } from './components/DocumentsView';
+import HaqibatLampLogin from './components/HaqibatLampLogin';
 import { Layout } from './components/Layout';
 import { LoginView } from './components/LoginView';
 import { RecordDrawer } from './components/RecordDrawer';
@@ -32,7 +33,11 @@ const MainRouter: React.FC = () => {
   }
 
   if (!currentUser) {
-    return <LoginView />;
+    return (
+      <HaqibatLampLogin>
+        <LoginView />
+      </HaqibatLampLogin>
+    );
   }
 
   return (
