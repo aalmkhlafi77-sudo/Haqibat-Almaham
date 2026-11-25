@@ -94,7 +94,7 @@ export const RecordDrawer: React.FC = () => {
     if (!activeRecord) return;
     setIsDirty(false);
     setDiscardPromptOpen(false);
-    setDeleteConfirmOpen(false);
+    setDeleteConfirmOpen(!!activeRecord?.openDelete);
     setValidationError('');
     setRenewalOpen(false);
     setRenewalError('');

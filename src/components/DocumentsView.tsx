@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { FileText, Plus, RefreshCw, Search } from 'lucide-react';
+import { FileText, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { resolveDocumentCategoryName } from '../data/repository';
 import {
@@ -29,8 +29,10 @@ export const DocumentsView: React.FC = () => {
     updateDocumentFilters,
     setDocumentWarningDays,
     openRecord,
+    requestDeleteRecord,
   } = useApp();
   const canWriteRecords = hasPerm('records:write');
+  const canDeleteRecords = hasPerm('records:delete');
   const filters = db.preferences.documentFilters;
   const warningDays = db.preferences.documentWarningDays;
   const today = getTodayISO();
@@ -346,6 +348,17 @@ export const DocumentsView: React.FC = () => {
                       <RefreshCw className="w-3.5 h-3.5" />
                       <span>تفاصيل وتجديد</span>
                     </button>
+                    {canDeleteRecords && (
+                      <button
+                        type="button"
+                        onClick={() => requestDeleteRecord('document', doc.id)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 dark:border-rose-900/50 text-xs font-medium text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/50"
+                        title="حذف الوثيقة"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               );

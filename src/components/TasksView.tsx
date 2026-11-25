@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { CheckSquare, Plus, RotateCcw, Search, Share2 } from 'lucide-react';
+import { CheckSquare, Plus, RotateCcw, Search, Share2, Trash2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { resolveTaskType, resolveTaskTypeName } from '../data/repository';
 import {
@@ -14,8 +14,9 @@ import { TaskItem, TaskStatus } from '../types/domain';
 import { StatusBadge } from './StatusBadge';
 
 export const TasksView: React.FC = () => {
-  const { db, hasPerm, updateTaskFilters, openRecord, openShareModal } = useApp();
+  const { db, hasPerm, updateTaskFilters, openRecord, openShareModal, requestDeleteRecord } = useApp();
   const canWriteRecords = hasPerm('records:write');
+  const canDeleteRecords = hasPerm('records:delete');
   const filters = db.preferences.taskFilters;
   const today = getTodayISO();
   const showHijri = db.preferences.showHijri;
@@ -379,6 +380,17 @@ export const TasksView: React.FC = () => {
                       <Share2 className="w-3.5 h-3.5" />
                       <span>مشاركة</span>
                     </button>
+                    {canDeleteRecords && (
+                      <button
+                        type="button"
+                        onClick={() => requestDeleteRecord('task', task.id)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 dark:border-rose-900/50 text-xs font-medium text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/50"
+                        title="حذف المهمة"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               );

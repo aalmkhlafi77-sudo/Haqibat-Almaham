@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Plus,
   Share2,
+  Trash2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { resolveTaskTypeName } from '../data/repository';
@@ -70,8 +71,9 @@ const HEATMAP_CATEGORY_META: Record<
 };
 
 export const CalendarView: React.FC = () => {
-  const { db, hasPerm, openRecord, openShareModal, setShowHijri } = useApp();
+  const { db, hasPerm, openRecord, openShareModal, setShowHijri, requestDeleteRecord } = useApp();
   const canWriteRecords = hasPerm('records:write');
+  const canDeleteRecords = hasPerm('records:delete');
   const today = getTodayISO();
   const showHijri = db.preferences.showHijri;
 
@@ -476,6 +478,16 @@ export const CalendarView: React.FC = () => {
                             title="مشاركة مع المختص"
                           >
                             <Share2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {item.recordType === 'calendar_item' && canDeleteRecords && (
+                          <button
+                            type="button"
+                            onClick={() => requestDeleteRecord('calendar_item', item.recordId)}
+                            className="p-1.5 rounded-lg border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/50"
+                            title="حذف التذكير أو الحدث"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         )}
                       </div>

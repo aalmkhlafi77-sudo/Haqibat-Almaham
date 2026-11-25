@@ -55,6 +55,7 @@ export interface ActiveRecordTarget {
   type: RecordType;
   id: string | null;
   prefill?: Record<string, unknown>;
+  openDelete?: boolean;
 }
 
 export interface ShareTargetPayload {
@@ -82,6 +83,7 @@ interface AppContextValue {
   toast: string | null;
   showToast: (msg: string) => void;
   openRecord: (type: RecordType, id: string | null, prefill?: Record<string, unknown>) => void;
+  requestDeleteRecord: (type: RecordType, id: string) => void;
   closeRecord: () => void;
   openShareModal: (payload: ShareTargetPayload) => void;
   closeShareModal: () => void;
@@ -364,6 +366,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
     setActiveRecord({ type, id, prefill });
+  };
+
+  const requestDeleteRecord = (type: RecordType, id: string) => {
+    if (!currentUser || !hasPermission(currentUser, 'records:delete')) {
+      showToast('الحساب الحالي لا يملك صلاحية حذف السجلات.');
+      return;
+    }
+    setActiveRecord({ type, id, openDelete: true });
   };
 
   const closeRecord = () => setActiveRecord(null);
@@ -1277,6 +1287,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toast,
         showToast,
         openRecord,
+        requestDeleteRecord,
         closeRecord,
         openShareModal,
         closeShareModal,

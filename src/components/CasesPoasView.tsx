@@ -8,6 +8,7 @@ import {
   Scale,
   Search,
   Share2,
+  Trash2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
@@ -25,8 +26,9 @@ import { StatusBadge } from './StatusBadge';
 const CASES_SECTION_KEYS = ['cases_list', 'sessions_list', 'poas_list'];
 
 export const CasesPoasView: React.FC = () => {
-  const { db, hasPerm, openRecord, openShareModal, setSectionsCollapsed } = useApp();
+  const { db, hasPerm, openRecord, openShareModal, setSectionsCollapsed, requestDeleteRecord } = useApp();
   const canWriteRecords = hasPerm('records:write');
+  const canDeleteRecords = hasPerm('records:delete');
   const [searchQuery, setSearchQuery] = useState('');
   const today = getTodayISO();
   const showHijri = db.preferences.showHijri;
@@ -219,7 +221,20 @@ export const CasesPoasView: React.FC = () => {
                       <span>الجلسات: {sessCount}</span>
                     </div>
                   </div>
-                  <StatusBadge label={c.status} tone="gold" />
+                  <div className="flex items-center gap-2">
+                    <StatusBadge label={c.status} tone="gold" />
+                    {canDeleteRecords && (
+                      <button
+                        type="button"
+                        onClick={() => requestDeleteRecord('case', c.id)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 dark:border-rose-900/50 text-xs font-medium text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/50"
+                        title="حذف القضية"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })
@@ -316,6 +331,17 @@ export const CasesPoasView: React.FC = () => {
                       <Share2 className="w-3.5 h-3.5" />
                       <span>مشاركة</span>
                     </button>
+                    {canDeleteRecords && (
+                      <button
+                        type="button"
+                        onClick={() => requestDeleteRecord('session', s.id)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 dark:border-rose-900/50 text-xs font-medium text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/50"
+                        title="حذف الجلسة"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -375,11 +401,24 @@ export const CasesPoasView: React.FC = () => {
                       </span>
                     </div>
                   </div>
-                  <StatusBadge
-                    label={ph.label}
-                    tone={ph.isExpired ? 'danger' : ph.isUrgent ? 'warning' : 'success'}
-                    motionClass={motionClass}
-                  />
+                  <div className="flex items-center gap-2">
+                    <StatusBadge
+                      label={ph.label}
+                      tone={ph.isExpired ? 'danger' : ph.isUrgent ? 'warning' : 'success'}
+                      motionClass={motionClass}
+                    />
+                    {canDeleteRecords && (
+                      <button
+                        type="button"
+                        onClick={() => requestDeleteRecord('poa', p.id)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 dark:border-rose-900/50 text-xs font-medium text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/50"
+                        title="حذف الوكالة"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })
