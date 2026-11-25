@@ -12,11 +12,17 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
+  resolveDocumentCategoryName,
+  resolveTaskTypeName,
+} from '../data/repository';
+import {
   evaluateDocumentHealth,
   evaluateTaskDelay,
+  evaluateUrgentAlert,
   formatDateTime,
   formatDisplayDate,
   getTodayISO,
+  getUrgentAlertMotionClass,
 } from '../domain/dateUtils';
 import { CollapsibleSection } from './CollapsibleSection';
 import { LabelsSection } from './LabelsSection';
@@ -168,10 +174,22 @@ export const TodayView: React.FC = () => {
               <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
                 {overdueTasks.map((task) => {
                   const delay = evaluateTaskDelay(task, today);
+                  const isTerminal =
+                    task.status === 'مكتملة' || task.status === 'ملغاة' || !!task.archivedAt;
+                  const urgent = evaluateUrgentAlert(
+                    task.dueDate,
+                    isTerminal,
+                    db.preferences.urgentAlertDays,
+                    today
+                  );
+                  const motionClass = getUrgentAlertMotionClass(
+                    urgent.isUrgentAlert,
+                    db.preferences.urgentAlertMotion
+                  );
                   return (
                     <div
                       key={task.id}
-                      className="py-2.5 first:pt-0 last:pb-0 flex flex-wrap items-center justify-between gap-2"
+                      className={`py-2.5 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 border border-transparent rounded-xl ${motionClass}`}
                     >
                       <div className="min-w-0 flex-1">
                         <button
@@ -182,7 +200,7 @@ export const TodayView: React.FC = () => {
                           {task.title}
                         </button>
                         <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-1.5 mt-0.5">
-                          <span>{task.type}</span>
+                          <span>{resolveTaskTypeName(task, db.taskTypes)}</span>
                           <span>·</span>
                           <span>{getSpecialistName(task.specialistId)}</span>
                           <span>·</span>
@@ -211,68 +229,105 @@ export const TodayView: React.FC = () => {
               </p>
             ) : (
               <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
-                {tasksDueToday.map((task) => (
-                  <div
-                    key={task.id}
-                    className="py-2.5 first:pt-0 last:pb-0 flex flex-wrap items-center justify-between gap-2"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <button
-                        type="button"
-                        onClick={() => openRecord('task', task.id)}
-                        className="text-right font-semibold text-sm text-slate-900 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 hover:underline block truncate max-w-full"
-                      >
-                        {task.title}
-                      </button>
-                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        مهمة {task.type} · {getSpecialistName(task.specialistId)} · الأولوية: {task.priority}
+                {tasksDueToday.map((task) => {
+                  const urgent = evaluateUrgentAlert(
+                    task.dueDate,
+                    false,
+                    db.preferences.urgentAlertDays,
+                    today
+                  );
+                  const motionClass = getUrgentAlertMotionClass(
+                    urgent.isUrgentAlert,
+                    db.preferences.urgentAlertMotion
+                  );
+                  return (
+                    <div
+                      key={task.id}
+                      className={`py-2.5 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 border border-transparent rounded-xl ${motionClass}`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <button
+                          type="button"
+                          onClick={() => openRecord('task', task.id)}
+                          className="text-right font-semibold text-sm text-slate-900 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 hover:underline block truncate max-w-full"
+                        >
+                          {task.title}
+                        </button>
+                        <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                          مهمة {resolveTaskTypeName(task, db.taskTypes)} ·{' '}
+                          {getSpecialistName(task.specialistId)} · الأولوية: {task.priority}
+                        </div>
                       </div>
+                      <StatusBadge label="تستحق اليوم" tone="info" icon="clock" />
                     </div>
-                    <StatusBadge label="تستحق اليوم" tone="info" icon="clock" />
-                  </div>
-                ))}
+                  );
+                })}
 
-                {sessionsToday.map((sess) => (
-                  <div
-                    key={sess.id}
-                    className="py-2.5 first:pt-0 last:pb-0 flex flex-wrap items-center justify-between gap-2"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <button
-                        type="button"
-                        onClick={() => openRecord('session', sess.id)}
-                        className="text-right font-semibold text-sm text-slate-900 dark:text-slate-100 hover:text-violet-600 dark:hover:text-violet-400 hover:underline block truncate max-w-full"
-                      >
-                        {sess.title}
-                      </button>
-                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        جلسة · {formatDateTime(sess.scheduledAt, showHijri)} · {getSpecialistName(sess.specialistId)}
+                {sessionsToday.map((sess) => {
+                  const urgent = evaluateUrgentAlert(
+                    sess.scheduledAt,
+                    false,
+                    db.preferences.urgentAlertDays,
+                    today
+                  );
+                  const motionClass = getUrgentAlertMotionClass(
+                    urgent.isUrgentAlert,
+                    db.preferences.urgentAlertMotion
+                  );
+                  return (
+                    <div
+                      key={sess.id}
+                      className={`py-2.5 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 border border-transparent rounded-xl ${motionClass}`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <button
+                          type="button"
+                          onClick={() => openRecord('session', sess.id)}
+                          className="text-right font-semibold text-sm text-slate-900 dark:text-slate-100 hover:text-violet-600 dark:hover:text-violet-400 hover:underline block truncate max-w-full"
+                        >
+                          {sess.title}
+                        </button>
+                        <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                          جلسة · {formatDateTime(sess.scheduledAt, showHijri)} · {getSpecialistName(sess.specialistId)}
+                        </div>
                       </div>
+                      <StatusBadge label="جلسة اليوم" tone="purple" icon="gavel" />
                     </div>
-                    <StatusBadge label="جلسة اليوم" tone="purple" icon="gavel" />
-                  </div>
-                ))}
+                  );
+                })}
 
-                {calendarToday.map((ci) => (
-                  <div
-                    key={ci.id}
-                    className="py-2.5 first:pt-0 last:pb-0 flex flex-wrap items-center justify-between gap-2"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <button
-                        type="button"
-                        onClick={() => openRecord('calendar_item', ci.id)}
-                        className="text-right font-semibold text-sm text-slate-900 dark:text-slate-100 hover:text-violet-600 dark:hover:text-violet-400 hover:underline block truncate max-w-full"
-                      >
-                        {ci.title}
-                      </button>
-                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        {ci.kind} · {formatDateTime(ci.scheduledAt, showHijri)} · {getSpecialistName(ci.specialistId)}
+                {calendarToday.map((ci) => {
+                  const urgent = evaluateUrgentAlert(
+                    ci.scheduledAt,
+                    false,
+                    db.preferences.urgentAlertDays,
+                    today
+                  );
+                  const motionClass = getUrgentAlertMotionClass(
+                    urgent.isUrgentAlert,
+                    db.preferences.urgentAlertMotion
+                  );
+                  return (
+                    <div
+                      key={ci.id}
+                      className={`py-2.5 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 border border-transparent rounded-xl ${motionClass}`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <button
+                          type="button"
+                          onClick={() => openRecord('calendar_item', ci.id)}
+                          className="text-right font-semibold text-sm text-slate-900 dark:text-slate-100 hover:text-violet-600 dark:hover:text-violet-400 hover:underline block truncate max-w-full"
+                        >
+                          {ci.title}
+                        </button>
+                        <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                          {ci.kind} · {formatDateTime(ci.scheduledAt, showHijri)} · {getSpecialistName(ci.specialistId)}
+                        </div>
                       </div>
+                      <StatusBadge label={`${ci.kind} اليوم`} tone="purple" icon="clock" />
                     </div>
-                    <StatusBadge label={`${ci.kind} اليوم`} tone="purple" icon="clock" />
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </CollapsibleSection>
@@ -309,10 +364,20 @@ export const TodayView: React.FC = () => {
                       : health.category === 'قريبة الانتهاء'
                       ? 'warning'
                       : 'neutral';
+                  const urgent = evaluateUrgentAlert(
+                    doc.expiryDate,
+                    !!doc.archivedAt,
+                    db.preferences.urgentAlertDays,
+                    today
+                  );
+                  const motionClass = getUrgentAlertMotionClass(
+                    urgent.isUrgentAlert,
+                    db.preferences.urgentAlertMotion
+                  );
                   return (
                     <div
                       key={doc.id}
-                      className="py-2.5 first:pt-0 last:pb-0 flex flex-wrap items-center justify-between gap-2"
+                      className={`py-2.5 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 border border-transparent rounded-xl ${motionClass}`}
                     >
                       <div className="min-w-0 flex-1">
                         <button
@@ -323,6 +388,10 @@ export const TodayView: React.FC = () => {
                           {doc.name}
                         </button>
                         <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-1.5 mt-0.5">
+                          <span className="font-semibold text-teal-700 dark:text-teal-300">
+                            {resolveDocumentCategoryName(doc, db.documentCategories)}
+                          </span>
+                          <span>·</span>
                           <span>{doc.issuingAuthority}</span>
                           <span>·</span>
                           <span>المسؤول: {getSpecialistName(doc.specialistId)}</span>
@@ -372,17 +441,38 @@ export const TodayView: React.FC = () => {
               </p>
             ) : (
               <div className="space-y-3">
-                <div className="glass-surface-subtle rounded-xl p-3.5 space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <button
-                      type="button"
-                      onClick={() => openRecord('session', closestSession.id)}
-                      className="text-right font-bold text-sm text-slate-900 dark:text-white hover:text-violet-600 dark:hover:text-violet-400 hover:underline"
-                    >
-                      {closestSession.title}
-                    </button>
-                    <StatusBadge label={closestSession.status} tone="purple" icon="gavel" />
-                  </div>
+                {(() => {
+                  const sessUrgent = evaluateUrgentAlert(
+                    closestSession.scheduledAt,
+                    false,
+                    db.preferences.urgentAlertDays,
+                    today
+                  );
+                  const sessMotion = getUrgentAlertMotionClass(
+                    sessUrgent.isUrgentAlert,
+                    db.preferences.urgentAlertMotion
+                  );
+                  return (
+                    <div className={`glass-surface-subtle rounded-xl p-3.5 space-y-2 ${sessMotion}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openRecord('session', closestSession.id)}
+                          className="text-right font-bold text-sm text-slate-900 dark:text-white hover:text-violet-600 dark:hover:text-violet-400 hover:underline"
+                        >
+                          {closestSession.title}
+                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {sessUrgent.isUrgentAlert && sessUrgent.badgeText && (
+                            <StatusBadge
+                              label={sessUrgent.badgeText}
+                              tone={sessUrgent.kind === 'today' ? 'today' : 'warning'}
+                              icon="clock"
+                            />
+                          )}
+                          <StatusBadge label={closestSession.status} tone="purple" icon="gavel" />
+                        </div>
+                      </div>
 
                   {closestSessionCase && (
                     <button
@@ -407,7 +497,9 @@ export const TodayView: React.FC = () => {
                   <div className="text-xs text-slate-500 dark:text-slate-400">
                     المختص: {getSpecialistName(closestSession.specialistId)}
                   </div>
-                </div>
+                    </div>
+                  );
+                })()}
 
                 {upcomingSessions.length > 1 && (
                   <div className="space-y-1.5">

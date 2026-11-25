@@ -1,13 +1,16 @@
 import React, { useMemo } from 'react';
 import { CheckSquare, Plus, RotateCcw, Search, Share2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { resolveTaskType, resolveTaskTypeName } from '../data/repository';
 import {
   evaluateTaskDelay,
+  evaluateUrgentAlert,
   formatDisplayDate,
   getTodayISO,
+  getUrgentAlertMotionClass,
 } from '../domain/dateUtils';
 import { scoreArabicSearchMatch } from '../domain/searchUtils';
-import { TaskItem, TaskStatus, TaskType } from '../types/domain';
+import { TaskItem, TaskStatus } from '../types/domain';
 import { StatusBadge } from './StatusBadge';
 
 export const TasksView: React.FC = () => {
@@ -27,7 +30,7 @@ export const TasksView: React.FC = () => {
         if (filters.onlyMine && t.specialistId !== db.preferences.currentSpecialistId) {
           return null;
         }
-        if (filters.type !== 'الكل' && t.type !== filters.type) return null;
+        if (filters.type !== 'الكل' && t.typeId !== filters.type) return null;
         if (filters.status === 'المفتوحة') {
           if (t.status === 'مكتملة' || t.status === 'ملغاة') return null;
         } else if (filters.status !== 'الكل' && t.status !== filters.status) {
@@ -46,12 +49,13 @@ export const TasksView: React.FC = () => {
         ) {
           return null;
         }
+        const typeLabel = resolveTaskTypeName(t, db.taskTypes);
         const score = q
           ? scoreArabicSearchMatch(q, t.title, [
               t.departmentName,
               t.letterNumber,
               t.authorityName,
-              t.type,
+              typeLabel,
               t.status,
               t.notes,
               getSpecialistName(t.specialistId),
@@ -67,7 +71,7 @@ export const TasksView: React.FC = () => {
           : a.t.dueDate.localeCompare(b.t.dueDate)
       )
       .map((x) => x.t);
-  }, [db.tasks, db.specialists, db.preferences.currentSpecialistId, filters, today]);
+  }, [db.tasks, db.taskTypes, db.specialists, db.preferences.currentSpecialistId, filters, today]);
 
   const currentSpecName = getSpecialistName(db.preferences.currentSpecialistId);
 
@@ -159,14 +163,17 @@ export const TasksView: React.FC = () => {
           </div>
 
           <select
+            aria-label="فلتر نوع المهمة"
             value={filters.type}
-            onChange={(e) => updateTaskFilters({ type: e.target.value as 'الكل' | TaskType })}
+            onChange={(e) => updateTaskFilters({ type: e.target.value })}
             className="h-9 px-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100"
           >
             <option value="الكل">النوع: الكل</option>
-            <option value="قضائية">قضائية</option>
-            <option value="إدارية">إدارية</option>
-            <option value="تجديد">تجديد</option>
+            {db.taskTypes.map((tt) => (
+              <option key={tt.id} value={tt.id}>
+                {tt.name}
+              </option>
+            ))}
           </select>
 
           <select
@@ -234,6 +241,20 @@ export const TasksView: React.FC = () => {
           <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
             {filteredTasks.map((task) => {
               const delay = evaluateTaskDelay(task, today);
+              const typeObj = resolveTaskType(task, db.taskTypes);
+              const typeName = typeObj?.name || task.type;
+              const isTerminal =
+                task.status === 'مكتملة' || task.status === 'ملغاة' || !!task.archivedAt;
+              const urgent = evaluateUrgentAlert(
+                task.dueDate,
+                isTerminal,
+                db.preferences.urgentAlertDays,
+                today
+              );
+              const motionClass = getUrgentAlertMotionClass(
+                urgent.isUrgentAlert,
+                db.preferences.urgentAlertMotion
+              );
               const taskLabels = db.labels.filter(
                 (l) => l.targetType === 'task' && l.targetId === task.id
               );
@@ -241,7 +262,7 @@ export const TasksView: React.FC = () => {
               return (
                 <div
                   key={task.id}
-                  className="p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/35 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3"
+                  className={`p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/35 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3 border border-transparent rounded-xl ${motionClass}`}
                 >
                   <div className="min-w-0 space-y-1 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -256,7 +277,7 @@ export const TasksView: React.FC = () => {
 
                     <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="font-semibold text-blue-700 dark:text-blue-300">
-                        {task.type}
+                        {typeName}
                       </span>
                       <span>·</span>
                       <span>المختص: {getSpecialistName(task.specialistId)}</span>
@@ -276,14 +297,15 @@ export const TasksView: React.FC = () => {
                       )}
                     </div>
 
-                    {task.type === 'إدارية' && (task.letterNumber || task.authorityName) && (
-                      <div className="text-xs text-slate-600 dark:text-slate-300">
-                        خطاب: {task.letterNumber || '—'} · الجهة: {task.authorityName || '—'}
-                        {task.receivedDate
-                          ? ` · تاريخ الاستلام: ${formatDisplayDate(task.receivedDate, showHijri)}`
-                          : ''}
-                      </div>
-                    )}
+                    {(typeObj?.isAdminKind || task.type === 'إدارية' || task.letterNumber || task.authorityName) &&
+                      (task.letterNumber || task.authorityName) && (
+                        <div className="text-xs text-slate-600 dark:text-slate-300">
+                          خطاب: {task.letterNumber || '—'} · الجهة: {task.authorityName || '—'}
+                          {task.receivedDate
+                            ? ` · تاريخ الاستلام: ${formatDisplayDate(task.receivedDate, showHijri)}`
+                            : ''}
+                        </div>
+                      )}
 
                     {taskLabels.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 pt-1">
@@ -322,13 +344,19 @@ export const TasksView: React.FC = () => {
                           : 'clock'
                       }
                     />
-                    {delay.label && (
+                    {delay.label ? (
                       <StatusBadge
                         label={delay.label}
                         tone={delay.isOverdue ? 'danger' : 'warning'}
                         icon="alert"
                       />
-                    )}
+                    ) : urgent.isUrgentAlert && urgent.badgeText ? (
+                      <StatusBadge
+                        label={urgent.badgeText}
+                        tone={urgent.kind === 'today' ? 'today' : 'warning'}
+                        icon="clock"
+                      />
+                    ) : null}
                     <button
                       type="button"
                       onClick={() =>
@@ -338,7 +366,7 @@ export const TasksView: React.FC = () => {
                           recordTitle: task.title,
                           specialistId: task.specialistId,
                           scheduledInfo: task.dueDate,
-                          defaultMessage: `السلام عليكم، نرجو متابعة المهمة (${task.type}):\n«${task.title}»\nالموعد: ${formatDisplayDate(task.dueDate, showHijri)}`,
+                          defaultMessage: `السلام عليكم، نرجو متابعة المهمة (${typeName}):\n«${task.title}»\nالموعد: ${formatDisplayDate(task.dueDate, showHijri)}`,
                         })
                       }
                       className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"

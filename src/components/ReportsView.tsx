@@ -10,6 +10,7 @@ import {
   toEnglishDigits,
 } from '../domain/dateUtils';
 import { RecordType } from '../types/domain';
+import { ArabicDatePicker } from './ArabicDatePicker';
 import { StatusBadge } from './StatusBadge';
 
 type OperationTypeFilter = 'الكل' | 'مهام' | 'وثائق' | 'جلسات' | 'وكالات' | 'تقويم';
@@ -297,26 +298,26 @@ export const ReportsView: React.FC = () => {
             <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
               من تاريخ
             </label>
-            <input
-              type="date"
-              lang="en"
-              dir="ltr"
+            <ArabicDatePicker
+              mode="date"
+              showHijri={showHijri}
               value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="w-full h-9 px-2.5 rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] text-xs font-mono-tabular"
+              onChange={setFromDate}
+              ariaLabel="من تاريخ"
+              className="h-9 !py-1 text-xs"
             />
           </div>
           <div>
             <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
               إلى تاريخ
             </label>
-            <input
-              type="date"
-              lang="en"
-              dir="ltr"
+            <ArabicDatePicker
+              mode="date"
+              showHijri={showHijri}
               value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              className="w-full h-9 px-2.5 rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] text-xs font-mono-tabular"
+              onChange={setToDate}
+              ariaLabel="إلى تاريخ"
+              className="h-9 !py-1 text-xs"
             />
           </div>
           <div>

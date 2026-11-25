@@ -6,7 +6,33 @@ import {
   evaluateVat3ADraft,
   VAT_3A_RULES_VERSION,
 } from '../domain/vat3aEngine';
-import { AppDatabaseState, AppPreferences, Vat3ADraft } from '../types/domain';
+import {
+  AppDatabaseState,
+  AppPreferences,
+  DocumentCategoryItem,
+  TaskTypeItem,
+  Vat3ADraft,
+} from '../types/domain';
+
+export function buildInitialDocumentCategories(nowIso = `${getTodayISO()}T09:00:00`): DocumentCategoryItem[] {
+  return [
+    { id: 'cat-health', orgId: 'org-01', name: 'تأمين صحي', createdAt: nowIso, updatedAt: nowIso },
+    { id: 'cat-vehicles', orgId: 'org-01', name: 'تأمين مركبات', createdAt: nowIso, updatedAt: nowIso },
+    { id: 'cat-municipal', orgId: 'org-01', name: 'رخص بلدية', createdAt: nowIso, updatedAt: nowIso },
+    { id: 'cat-records', orgId: 'org-01', name: 'سجلات', createdAt: nowIso, updatedAt: nowIso },
+    { id: 'cat-certs', orgId: 'org-01', name: 'شهادات', createdAt: nowIso, updatedAt: nowIso },
+    { id: 'cat-iqamas', orgId: 'org-01', name: 'إقامات', createdAt: nowIso, updatedAt: nowIso },
+    { id: 'cat-contracts', orgId: 'org-01', name: 'عقود', createdAt: nowIso, updatedAt: nowIso },
+  ];
+}
+
+export function buildInitialTaskTypes(nowIso = `${getTodayISO()}T09:00:00`): TaskTypeItem[] {
+  return [
+    { id: 'ttype-judicial', orgId: 'org-01', name: 'قضائية', createdAt: nowIso, updatedAt: nowIso },
+    { id: 'ttype-admin', orgId: 'org-01', name: 'إدارية', isAdminKind: true, createdAt: nowIso, updatedAt: nowIso },
+    { id: 'ttype-renewal', orgId: 'org-01', name: 'تجديد', isRenewalKind: true, createdAt: nowIso, updatedAt: nowIso },
+  ];
+}
 
 export function buildDefaultPreferences(): AppPreferences {
   return {
@@ -15,6 +41,8 @@ export function buildDefaultPreferences(): AppPreferences {
     showHijri: false,
     currentSpecialistId: 'spec-01',
     documentWarningDays: 30,
+    urgentAlertDays: 3,
+    urgentAlertMotion: 'repeat_5s',
     vat3aRules: buildDefaultVat3ARulesConfig(),
     integrations: {
       serverBaseUrl: '',
@@ -37,6 +65,7 @@ export function buildDefaultPreferences(): AppPreferences {
     },
     documentFilters: {
       category: 'الكل',
+      categoryId: 'الكل',
       search: '',
       specialistId: 'الكل',
     },
@@ -118,6 +147,8 @@ export function createSeedDatabase(): AppDatabaseState {
         taxRegistrationNumber: '310482910400003',
       },
     ],
+    documentCategories: buildInitialDocumentCategories(nowIso),
+    taskTypes: buildInitialTaskTypes(nowIso),
     specialists: [
       {
         id: 'spec-01',
@@ -275,7 +306,8 @@ export function createSeedDatabase(): AppDatabaseState {
         id: 'doc-01',
         orgId: 'org-01',
         name: 'رخصة الدفاع المدني — المقر الرئيسي',
-        docType: 'ترخيص سلامة',
+        categoryId: 'cat-municipal',
+        docType: 'رخص بلدية',
         referenceNumber: 'CD-992014',
         issuingAuthority: 'المديرية العامة للدفاع المدني',
         specialistId: 'spec-02',
@@ -301,7 +333,8 @@ export function createSeedDatabase(): AppDatabaseState {
         id: 'doc-02',
         orgId: 'org-01',
         name: 'شهادة الزكاة والدخل السنوية',
-        docType: 'شهادة امتثال',
+        categoryId: 'cat-certs',
+        docType: 'شهادات',
         referenceNumber: 'ZATCA-441209',
         issuingAuthority: 'هيئة الزكاة والضريبة والجمارك',
         specialistId: 'spec-04',
@@ -317,7 +350,8 @@ export function createSeedDatabase(): AppDatabaseState {
         id: 'doc-03',
         orgId: 'org-01',
         name: 'رخصة نشاط تجاري — فرع جدة',
-        docType: 'رخصة بلدية',
+        categoryId: 'cat-municipal',
+        docType: 'رخص بلدية',
         referenceNumber: 'BAL-33812',
         issuingAuthority: 'أمانة محافظة جدة',
         specialistId: 'spec-02',
@@ -333,7 +367,8 @@ export function createSeedDatabase(): AppDatabaseState {
         id: 'doc-04',
         orgId: 'org-01',
         name: 'السجل التجاري الرئيسي',
-        docType: 'سجل نظامي',
+        categoryId: 'cat-records',
+        docType: 'سجلات',
         referenceNumber: '1010558291',
         issuingAuthority: 'وزارة التجارة',
         specialistId: 'spec-02',
@@ -349,7 +384,8 @@ export function createSeedDatabase(): AppDatabaseState {
         id: 'doc-05',
         orgId: 'org-01',
         name: 'عقد تأسيس الشركة والملحق المعدل',
-        docType: 'وثيقة تأسيس',
+        categoryId: 'cat-contracts',
+        docType: 'عقود',
         referenceNumber: 'MOA-101055',
         issuingAuthority: 'وزارة التجارة — التوثيق',
         specialistId: 'spec-01',
@@ -365,7 +401,8 @@ export function createSeedDatabase(): AppDatabaseState {
         id: 'doc-06',
         orgId: 'org-01',
         name: 'شهادة التأمين الطبي للموظفين 2025',
-        docType: 'بوليصة تأمين',
+        categoryId: 'cat-health',
+        docType: 'تأمين صحي',
         referenceNumber: 'INS-2025-88',
         issuingAuthority: 'مجلس الضمان الصحي',
         specialistId: 'spec-03',
@@ -382,6 +419,7 @@ export function createSeedDatabase(): AppDatabaseState {
       {
         id: 'task-01',
         orgId: 'org-01',
+        typeId: 'ttype-judicial',
         type: 'قضائية',
         title: 'إعداد المذكرة الختامية لقضية التجهيزات المكتبية',
         specialistId: 'spec-01',
@@ -400,6 +438,7 @@ export function createSeedDatabase(): AppDatabaseState {
       {
         id: 'task-02',
         orgId: 'org-01',
+        typeId: 'ttype-admin',
         type: 'إدارية',
         title: 'الرد على خطاب استفسار مكتب العمل رقم 1142',
         specialistId: 'spec-03',
@@ -419,13 +458,14 @@ export function createSeedDatabase(): AppDatabaseState {
       {
         id: 'task-03',
         orgId: 'org-01',
+        typeId: 'ttype-renewal',
         type: 'تجديد',
         title: 'استكمال فحص السلامة لتجديد رخصة الدفاع المدني',
         specialistId: 'spec-02',
         departmentName: 'الوثائق والتراخيص',
         priority: 'مرتفعة',
         status: 'جديدة',
-        dueDate: addDaysISO(today, 5),
+        dueDate: addDaysISO(today, 2),
         actualDeliveryDate: null,
         documentId: 'doc-01',
         notes: 'مهمة مرتبطة برخصة الدفاع المدني للمقر الرئيسي.',
@@ -436,6 +476,7 @@ export function createSeedDatabase(): AppDatabaseState {
       {
         id: 'task-04',
         orgId: 'org-01',
+        typeId: 'ttype-admin',
         type: 'إدارية',
         title: 'تسليم خطاب اعتماد التوقيع البنكي للغرفة التجارية',
         specialistId: 'spec-03',
@@ -455,6 +496,7 @@ export function createSeedDatabase(): AppDatabaseState {
       {
         id: 'task-05',
         orgId: 'org-01',
+        typeId: 'ttype-judicial',
         type: 'قضائية',
         title: 'تحديث بيانات الوكالة في بوابة ناجز',
         specialistId: 'spec-01',
@@ -472,13 +514,14 @@ export function createSeedDatabase(): AppDatabaseState {
       {
         id: 'task-06',
         orgId: 'org-01',
+        typeId: 'ttype-admin',
         type: 'إدارية',
         title: 'مراجعة محضر تسليم موقع مستودع السلي',
         specialistId: 'spec-01',
         departmentName: 'الشؤون القانونية',
         priority: 'منخفضة',
         status: 'معلقة',
-        dueDate: addDaysISO(today, 9),
+        dueDate: addDaysISO(today, 4),
         actualDeliveryDate: null,
         letterNumber: 'م-318/2026',
         authorityName: 'الشركة العقارية للتطوير',
@@ -544,6 +587,9 @@ export function createSeedDatabase(): AppDatabaseState {
         text: 'أولوية اليوم: إنهاء شهادة الزكاة وتجهيز جلسة الغد',
         bgColor: '#FEF3C7',
         textColor: '#0F172A',
+        posX: 16,
+        posY: 14,
+        attentionPulse: true,
         createdAt: nowIso,
         updatedAt: nowIso,
       },
@@ -554,6 +600,9 @@ export function createSeedDatabase(): AppDatabaseState {
         text: 'متابعة أمانة جدة لرفع إيقاف الرخصة',
         bgColor: '#CCFBF1',
         textColor: '#0F172A',
+        posX: 16,
+        posY: 72,
+        attentionPulse: false,
         createdAt: nowIso,
         updatedAt: nowIso,
       },
@@ -564,6 +613,9 @@ export function createSeedDatabase(): AppDatabaseState {
         text: 'خطاب رسمي عاجل — يتطلب توقيع المدير العام',
         bgColor: '#FFE4E6',
         textColor: '#0F172A',
+        posX: 14,
+        posY: 14,
+        attentionPulse: true,
         createdAt: nowIso,
         updatedAt: nowIso,
       },
@@ -574,6 +626,9 @@ export function createSeedDatabase(): AppDatabaseState {
         text: 'عقد صيانة الطفايات مجدد حتى نهاية العام',
         bgColor: '#E0F2FE',
         textColor: '#0F172A',
+        posX: 14,
+        posY: 14,
+        attentionPulse: false,
         createdAt: nowIso,
         updatedAt: nowIso,
       },
@@ -584,6 +639,9 @@ export function createSeedDatabase(): AppDatabaseState {
         text: 'مرفق محاضر الاستلام الأصلية في الملف',
         bgColor: '#EDE9FE',
         textColor: '#0F172A',
+        posX: 14,
+        posY: 14,
+        attentionPulse: false,
         createdAt: nowIso,
         updatedAt: nowIso,
       },

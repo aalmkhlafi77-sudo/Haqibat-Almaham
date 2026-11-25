@@ -6,17 +6,22 @@
 
 ```
 organizations ──┬──< departments / authorities
+                ├──< document_categories ──< documents (category_id, ON DELETE SET NULL)
+                ├──< task_types ──< tasks (type_id, ON DELETE RESTRICT)
                 ├──< specialists ──< (tasks, documents, cases, case_sessions, poas, calendar_items)
                 ├──< cases ──< case_sessions ──< tasks (session_id)
                 ├──< documents ──< document_renewals (يحفظ التاريخ السابق والجديد)
-                │               └──< tasks (type='تجديد', document_id)
+                │               └──< tasks (type_id, document_id)
                 ├──< poas
                 ├──< calendar_items (ربط اختياري بـ specialist_id وسجل تشغيلي)
+                ├──< labels (pos_x, pos_y, attention_pulse)
                 ├──< vat_3a_drafts ──< vat_3a_lines (amount_halalas, adjustment_halalas, vat_halalas)
                 └──< share_logs (status='فُتحت المشاركة')
 ```
 
 ### قواعد أثر الحذف (`ON DELETE`) الموحدة بين المعاينة وMySQL
+- **حذف تصنيف وثيقة (`document_categories`)**: لا تُحذف الوثائق أو سجلات تجديداتها أبدًا؛ يُعرض أثر الحذف مع خيار نقل الوثائق المرتبطة إلى تصنيف بديل قبل الحذف أو إلغاء تصنيفها (`ON DELETE SET NULL` -> تصبح «غير مصنفة»).
+- **حذف نوع مهمة (`task_types`)**: يجب نقل المهام المرتبطة إلى نوع بديل أولًا (`ON DELETE RESTRICT`) مع الإبقاء على `document_id` و`case_id` و`session_id` كما هي.
 - **حذف قضية (`cases`)**: تُحذف جلساتها المرتبطة (`ON DELETE CASCADE`) وتُفك ارتباطات المهام والتقويم المرتبطة بالقضية أو بجلساتها المحذوفة (`SET NULL`) وتُحذف ملصقاتها بعد عرض تحذير صريح باسم القضية وعدد السجلات المتأثرة قبل التأكيد، وتُفضّل الأرشفة (`archived_at`) لحفظ التاريخ.
 - **حذف جلسة (`case_sessions`)**: تُفك ارتباطات المهام وعناصر التقويم المرتبطة بها (`SET NULL`) بعد عرض أثر الحذف وتأكيد المستخدم.
 - **حذف وثيقة (`documents`)**: إذا وُجدت سجلات تجديد (`document_renewals`) **يُمنع الحذف النهائي** في كلٍّ من المعاينة وMySQL (`ON DELETE RESTRICT`) لحماية التاريخ ويُتاح زر الأرشفة مباشرة؛ أما الوثيقة التي بلا سجلات تجديد فيمكن حذفها مع فك ارتباط مهام التجديد وعناصر التقويم (`SET NULL`) وحذف ملصقاتها.

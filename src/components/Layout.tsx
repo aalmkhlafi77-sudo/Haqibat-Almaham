@@ -22,6 +22,10 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
+  resolveDocumentCategoryName,
+  resolveTaskTypeName,
+} from '../data/repository';
+import {
   evaluateDocumentHealth,
   evaluatePoaHealth,
   evaluateTaskDelay,
@@ -208,12 +212,12 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         t.letterNumber,
         t.authorityName,
         t.departmentName,
-        t.type,
+        resolveTaskTypeName(t, db.taskTypes),
         t.status,
         t.notes,
         specName(t.specialistId),
       ],
-      (t) => `${t.type} · ${t.status}`
+      (t) => `${resolveTaskTypeName(t, db.taskTypes)} · ${t.status}`
     );
     if (taskHits.length > 0) {
       groups.push({
@@ -228,8 +232,14 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       db.documents,
       (d) => d.id,
       (d) => d.name,
-      (d) => [d.referenceNumber, d.issuingAuthority, d.docType, d.notes, specName(d.specialistId)],
-      (d) => `${d.docType} · ${d.referenceNumber}`
+      (d) => [
+        d.referenceNumber,
+        d.issuingAuthority,
+        resolveDocumentCategoryName(d, db.documentCategories),
+        d.notes,
+        specName(d.specialistId),
+      ],
+      (d) => `${resolveDocumentCategoryName(d, db.documentCategories)} · ${d.referenceNumber}`
     );
     if (docHits.length > 0) {
       groups.push({
@@ -326,7 +336,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   }, [
     searchQuery,
     db.tasks,
+    db.taskTypes,
     db.documents,
+    db.documentCategories,
     db.cases,
     db.sessions,
     db.poas,

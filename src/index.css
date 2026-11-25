@@ -76,10 +76,81 @@ html.dark .glass-surface-subtle {
   animation: softHeatmapPulse 2.4s ease-in-out infinite;
 }
 
+/* Label "لفت الانتباه" option */
+@keyframes labelAttentionPulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.25);
+  }
+  50% {
+    transform: scale(1.035);
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.35), 0 6px 16px rgba(245, 158, 11, 0.28);
+  }
+}
+
+.label-attention-pulse {
+  animation: labelAttentionPulse 2.2s ease-in-out infinite;
+}
+
+/* Urgent upcoming alerts (active records within 3 or 5 days) */
+@keyframes urgentGlowPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.45), 0 0 10px rgba(245, 158, 11, 0.16);
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.55), 0 0 18px rgba(245, 158, 11, 0.34);
+  }
+}
+
+@keyframes urgentGlowShake5s {
+  0% {
+    transform: translateX(0);
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.45), 0 0 8px rgba(245, 158, 11, 0.14);
+  }
+  4% {
+    transform: translateX(-2px);
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.55), 0 0 16px rgba(239, 68, 68, 0.28);
+  }
+  8% {
+    transform: translateX(2px);
+  }
+  12% {
+    transform: translateX(-2px);
+  }
+  16% {
+    transform: translateX(2px);
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.55), 0 0 16px rgba(245, 158, 11, 0.28);
+  }
+  20%, 100% {
+    transform: translateX(0);
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.38), 0 0 8px rgba(245, 158, 11, 0.12);
+  }
+}
+
+.urgent-alert-continuous {
+  animation: urgentGlowPulse 2s ease-in-out infinite;
+  border-color: rgba(245, 158, 11, 0.65) !important;
+}
+
+.urgent-alert-repeat-5s {
+  animation: urgentGlowShake5s 5s ease-in-out infinite;
+  border-color: rgba(245, 158, 11, 0.65) !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .heatmap-glow-dot {
-    animation: none;
+  .heatmap-glow-dot,
+  .label-attention-pulse,
+  .urgent-alert-continuous,
+  .urgent-alert-repeat-5s {
+    animation: none !important;
+    transform: none !important;
     opacity: 1;
+  }
+
+  .urgent-alert-continuous,
+  .urgent-alert-repeat-5s,
+  .label-attention-pulse {
+    box-shadow: 0 0 0 1.5px rgba(245, 158, 11, 0.65), 0 0 12px rgba(245, 158, 11, 0.22);
   }
 }
 

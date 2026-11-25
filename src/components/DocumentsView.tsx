@@ -1,10 +1,13 @@
 import React, { useMemo } from 'react';
 import { FileText, Plus, RefreshCw, Search } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { resolveDocumentCategoryName } from '../data/repository';
 import {
   evaluateDocumentHealth,
+  evaluateUrgentAlert,
   formatDisplayDate,
   getTodayISO,
+  getUrgentAlertMotionClass,
 } from '../domain/dateUtils';
 import { scoreArabicSearchMatch } from '../domain/searchUtils';
 import { DocumentCategoryFilter } from '../types/domain';
@@ -38,33 +41,56 @@ export const DocumentsView: React.FC = () => {
     () =>
       db.documents.map((doc) => ({
         doc,
+        categoryName: resolveDocumentCategoryName(doc, db.documentCategories),
         health: evaluateDocumentHealth(doc, warningDays, today),
       })),
-    [db.documents, warningDays, today]
+    [db.documents, db.documentCategories, warningDays, today]
   );
 
+  // Validity counts reflect the currently selected category & specialist filters (independent filters)
   const counts = useMemo(() => {
+    const scoped = evaluatedDocs.filter(({ doc }) => {
+      if (filters.categoryId === '__uncategorized__' && doc.categoryId !== null) {
+        return false;
+      }
+      if (
+        filters.categoryId !== 'الكل' &&
+        filters.categoryId !== '__uncategorized__' &&
+        doc.categoryId !== filters.categoryId
+      ) {
+        return false;
+      }
+      if (filters.specialistId !== 'الكل' && doc.specialistId !== filters.specialistId) {
+        return false;
+      }
+      return true;
+    });
     const map: Record<DocumentCategoryFilter, number> = {
-      الكل: evaluatedDocs.filter((x) => !x.doc.archivedAt).length,
+      الكل: scoped.filter((x) => !x.doc.archivedAt).length,
       سارية: 0,
       'قريبة الانتهاء': 0,
       منتهية: 0,
       'بلا تاريخ': 0,
       مؤرشفة: 0,
     };
-    for (const item of evaluatedDocs) {
+    for (const item of scoped) {
       map[item.health.filterBucket] += 1;
     }
     return map;
-  }, [evaluatedDocs]);
+  }, [evaluatedDocs, filters.categoryId, filters.specialistId]);
 
   const filteredDocs = useMemo(() => {
     const q = filters.search.trim();
     return evaluatedDocs
-      .map(({ doc, health }) => {
+      .map(({ doc, categoryName, health }) => {
         if (filters.category === 'الكل') {
           if (doc.archivedAt) return null;
         } else if (health.filterBucket !== filters.category) {
+          return null;
+        }
+        if (filters.categoryId === '__uncategorized__') {
+          if (doc.categoryId !== null) return null;
+        } else if (filters.categoryId !== 'الكل' && doc.categoryId !== filters.categoryId) {
           return null;
         }
         if (filters.specialistId !== 'الكل' && doc.specialistId !== filters.specialistId) {
@@ -72,7 +98,7 @@ export const DocumentsView: React.FC = () => {
         }
         const score = q
           ? scoreArabicSearchMatch(q, doc.name, [
-              doc.docType,
+              categoryName,
               doc.referenceNumber,
               doc.issuingAuthority,
               doc.notes,
@@ -80,14 +106,20 @@ export const DocumentsView: React.FC = () => {
             ])
           : 1;
         if (score <= 0) return null;
-        return { doc, health, score };
+        return { doc, categoryName, health, score };
       })
       .filter(
-        (x): x is { doc: (typeof evaluatedDocs)[number]['doc']; health: (typeof evaluatedDocs)[number]['health']; score: number } =>
-          x !== null
+        (
+          x
+        ): x is {
+          doc: (typeof evaluatedDocs)[number]['doc'];
+          categoryName: string;
+          health: (typeof evaluatedDocs)[number]['health'];
+          score: number;
+        } => x !== null
       )
       .sort((a, b) => (q ? b.score - a.score : 0))
-      .map(({ doc, health }) => ({ doc, health }));
+      .map(({ doc, categoryName, health }) => ({ doc, categoryName, health }));
   }, [evaluatedDocs, filters, db.specialists]);
 
   return (
@@ -152,17 +184,32 @@ export const DocumentsView: React.FC = () => {
           </label>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3" />
             <input
               type="search"
               value={filters.search}
               onChange={(e) => updateDocumentFilters({ search: e.target.value })}
-              placeholder="بحث باسم الوثيقة أو المرجع أو الجهة..."
+              placeholder="بحث باسم الوثيقة أو المرجع أو التصنيف..."
               className="w-full h-9 pr-8 pl-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100"
             />
           </div>
+
+          <select
+            aria-label="فلتر تصنيف الوثيقة"
+            value={filters.categoryId}
+            onChange={(e) => updateDocumentFilters({ categoryId: e.target.value })}
+            className="h-9 px-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100"
+          >
+            <option value="الكل">التصنيف: الكل</option>
+            {db.documentCategories.map((cat) => (
+              <option key={cat.id} value={cat.id}>
+                {cat.name}
+              </option>
+            ))}
+            <option value="__uncategorized__">غير مصنفة</option>
+          </select>
 
           <select
             value={filters.specialistId}
@@ -183,11 +230,11 @@ export const DocumentsView: React.FC = () => {
       <div className="glass-panel rounded-xl overflow-hidden">
         {filteredDocs.length === 0 ? (
           <p className="p-8 text-center text-sm text-slate-500 dark:text-slate-400">
-            لا توجد وثائق في هذا التصنيف.
+            لا توجد وثائق مطابقة لحالة الصلاحية والتصنيف المحددين.
           </p>
         ) : (
           <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
-            {filteredDocs.map(({ doc, health }) => {
+            {filteredDocs.map(({ doc, categoryName, health }) => {
               const badgeTone =
                 health.category === 'منتهية'
                   ? 'danger'
@@ -203,11 +250,21 @@ export const DocumentsView: React.FC = () => {
               const linkedRenewalCount = db.tasks.filter(
                 (t) => t.documentId === doc.id && t.status !== 'مكتملة' && t.status !== 'ملغاة'
               ).length;
+              const urgent = evaluateUrgentAlert(
+                doc.expiryDate,
+                !!doc.archivedAt,
+                db.preferences.urgentAlertDays,
+                today
+              );
+              const motionClass = getUrgentAlertMotionClass(
+                urgent.isUrgentAlert,
+                db.preferences.urgentAlertMotion
+              );
 
               return (
                 <div
                   key={doc.id}
-                  className="p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/35 flex flex-col lg:flex-row lg:items-center justify-between gap-3"
+                  className={`p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/35 flex flex-col lg:flex-row lg:items-center justify-between gap-3 border border-transparent rounded-xl transition-colors ${motionClass}`}
                 >
                   <div className="min-w-0 space-y-1 flex-1">
                     <button
@@ -219,7 +276,9 @@ export const DocumentsView: React.FC = () => {
                     </button>
 
                     <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span>{doc.docType}</span>
+                      <span className="font-semibold text-teal-700 dark:text-teal-300">
+                        {categoryName}
+                      </span>
                       <span>·</span>
                       <span>المرجع: {doc.referenceNumber}</span>
                       <span>·</span>
@@ -236,7 +295,9 @@ export const DocumentsView: React.FC = () => {
                       {doc.renewals.length > 0 && (
                         <>
                           <span>·</span>
-                          <span>سجل التجديدات: {doc.renewals.length}</span>
+                          <span>
+                            سجل التجديدات: {doc.renewals.length} ({categoryName})
+                          </span>
                         </>
                       )}
                       {linkedRenewalCount > 0 && (
@@ -251,6 +312,13 @@ export const DocumentsView: React.FC = () => {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    {urgent.isUrgentAlert && urgent.badgeText && health.category === 'سارية' && (
+                      <StatusBadge
+                        label={urgent.badgeText}
+                        tone="warning"
+                        icon="clock"
+                      />
+                    )}
                     <StatusBadge
                       label={health.badgeText}
                       tone={badgeTone}

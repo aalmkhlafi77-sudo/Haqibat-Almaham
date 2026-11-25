@@ -36,13 +36,32 @@ export interface Specialist {
   isActive: boolean;
 }
 
-export type TaskType = 'قضائية' | 'إدارية' | 'تجديد';
+export interface DocumentCategoryItem {
+  id: string;
+  orgId: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskTypeItem {
+  id: string;
+  orgId: string;
+  name: string;
+  isAdminKind?: boolean;
+  isRenewalKind?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type TaskType = string;
 export type TaskPriority = 'عاجلة' | 'مرتفعة' | 'متوسطة' | 'منخفضة';
 export type TaskStatus = 'جديدة' | 'قيد التنفيذ' | 'معلقة' | 'مكتملة' | 'ملغاة';
 
 export interface TaskItem {
   id: string;
   orgId: string;
+  typeId: string;
   type: TaskType;
   title: string;
   specialistId: string | null;
@@ -77,6 +96,7 @@ export interface DocumentItem {
   id: string;
   orgId: string;
   name: string;
+  categoryId: string | null;
   docType: string;
   referenceNumber: string;
   issuingAuthority: string;
@@ -171,6 +191,9 @@ export interface LabelItem {
   text: string;
   bgColor: string;
   textColor: string;
+  posX?: number | null;
+  posY?: number | null;
+  attentionPulse?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -266,7 +289,7 @@ export interface IntegrationSettings {
 
 export interface TaskFilters {
   onlyMine: boolean;
-  type: 'الكل' | TaskType;
+  type: 'الكل' | string; // 'الكل' or taskTypeId
   status: 'الكل' | 'المفتوحة' | TaskStatus;
   dueFilter: 'الكل' | 'اليوم' | 'متأخرة' | 'قادمة';
   specialistId: 'الكل' | string;
@@ -282,7 +305,8 @@ export type DocumentCategoryFilter =
   | 'مؤرشفة';
 
 export interface DocumentFilters {
-  category: DocumentCategoryFilter;
+  category: DocumentCategoryFilter; // Validity status bucket
+  categoryId: 'الكل' | '__uncategorized__' | string; // Independent document category ID
   search: string;
   specialistId: 'الكل' | string;
 }
@@ -293,12 +317,17 @@ export interface Vat3AArchiveFilters {
   search: string;
 }
 
+export type UrgentAlertDays = 3 | 5;
+export type UrgentAlertMotionMode = 'repeat_5s' | 'continuous';
+
 export interface AppPreferences {
   theme: ThemeMode;
   sidebarCollapsed: boolean;
   showHijri: boolean;
   currentSpecialistId: string;
   documentWarningDays: number;
+  urgentAlertDays: UrgentAlertDays;
+  urgentAlertMotion: UrgentAlertMotionMode;
   vat3aRules: Vat3ARulesConfig;
   integrations: IntegrationSettings;
   collapsedSections: Record<string, boolean>;
@@ -312,6 +341,8 @@ export interface AppPreferences {
 export interface AppDatabaseState {
   organizations: Organization[];
   specialists: Specialist[];
+  documentCategories: DocumentCategoryItem[];
+  taskTypes: TaskTypeItem[];
   tasks: TaskItem[];
   documents: DocumentItem[];
   cases: CaseItem[];

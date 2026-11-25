@@ -41,6 +41,7 @@ import {
   downloadVat3APdf,
 } from '../domain/vat3aExport';
 import { Vat3ADraft, Vat3ADraftStatus, Vat3ALineId } from '../types/domain';
+import { ArabicDatePicker } from './ArabicDatePicker';
 import { StatusBadge } from './StatusBadge';
 
 export const Vat3AView: React.FC = () => {
@@ -613,28 +614,28 @@ export const Vat3AView: React.FC = () => {
           <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
             بداية الفترة *
           </label>
-          <input
-            type="date"
-            lang="en"
-            dir="ltr"
+          <ArabicDatePicker
+            mode="date"
+            clearable={false}
             disabled={isArchived}
+            showHijri={db.preferences.showHijri}
             value={draft.periodStart}
-            onChange={(e) => setDraft({ ...draft, periodStart: e.target.value })}
-            className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-sm font-mono-tabular disabled:opacity-60"
+            onChange={(nextVal) => setDraft({ ...draft, periodStart: nextVal })}
+            ariaLabel="بداية الفترة"
           />
         </div>
         <div>
           <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
             نهاية الفترة *
           </label>
-          <input
-            type="date"
-            lang="en"
-            dir="ltr"
+          <ArabicDatePicker
+            mode="date"
+            clearable={false}
             disabled={isArchived}
+            showHijri={db.preferences.showHijri}
             value={draft.periodEnd}
-            onChange={(e) => setDraft({ ...draft, periodEnd: e.target.value })}
-            className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-sm font-mono-tabular disabled:opacity-60"
+            onChange={(nextVal) => setDraft({ ...draft, periodEnd: nextVal })}
+            ariaLabel="نهاية الفترة"
           />
         </div>
 
@@ -1439,24 +1440,26 @@ export const Vat3AView: React.FC = () => {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold mb-1">بداية الفترة الجديدة</label>
-                <input
-                  type="date"
-                  lang="en"
-                  dir="ltr"
+                <ArabicDatePicker
+                  mode="date"
+                  clearable={false}
+                  showHijri={db.preferences.showHijri}
                   value={copyStart}
-                  onChange={(e) => setCopyStart(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-xs font-mono-tabular"
+                  onChange={setCopyStart}
+                  ariaLabel="بداية الفترة الجديدة"
+                  className="text-xs"
                 />
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-1">نهاية الفترة الجديدة</label>
-                <input
-                  type="date"
-                  lang="en"
-                  dir="ltr"
+                <ArabicDatePicker
+                  mode="date"
+                  clearable={false}
+                  showHijri={db.preferences.showHijri}
                   value={copyEnd}
-                  onChange={(e) => setCopyEnd(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-xs font-mono-tabular"
+                  onChange={setCopyEnd}
+                  ariaLabel="نهاية الفترة الجديدة"
+                  className="text-xs"
                 />
               </div>
             </div>

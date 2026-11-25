@@ -35,17 +35,31 @@ INSERT INTO `case_sessions` (`id`, `org_id`, `case_id`, `title`, `scheduled_at`,
 ('sess-01', 'org-01', 'case-01', 'جلسة تقديم المذكرة الختامية والبينات', DATE_ADD(CURDATE(), INTERVAL 1 DAY) + INTERVAL 10 HOUR + INTERVAL 30 MINUTE, 'مجدولة', NULL, 'spec-01', 'عن بُعد — منصة ناجز', 'التأكد من رفع المرفقات قبل موعد الجلسة بساعة.'),
 ('sess-02', 'org-01', 'case-02', 'جلسة الاستماع الأولى للاعتراض الإداري', DATE_ADD(CURDATE(), INTERVAL 6 DAY) + INTERVAL 9 HOUR + INTERVAL 15 MINUTE, 'مجدولة', NULL, 'spec-01', 'القاعة 4 — المحكمة الإدارية بجدة', 'إحضار أصل السجل التجاري ورخصة الفرع.');
 
-INSERT INTO `documents` (`id`, `org_id`, `authority_id`, `name`, `doc_type`, `reference_number`, `issuing_authority`, `specialist_id`, `issue_date`, `expiry_date`, `notes`) VALUES
-('doc-01', 'org-01', 'auth-01', 'رخصة الدفاع المدني — المقر الرئيسي', 'ترخيص سلامة', 'CD-992014', 'المديرية العامة للدفاع المدني', 'spec-02', DATE_SUB(CURDATE(), INTERVAL 350 DAY), DATE_ADD(CURDATE(), INTERVAL 14 DAY), 'يتطلب فحص طفايات الحريق وعقد الصيانة السنوي.'),
-('doc-02', 'org-01', 'auth-02', 'شهادة الزكاة والدخل السنوية', 'شهادة امتثال', 'ZATCA-441209', 'هيئة الزكاة والضريبة والجمارك', 'spec-04', DATE_SUB(CURDATE(), INTERVAL 365 DAY), CURDATE(), 'تنتهي اليوم — يجب سداد الفاتورة وإصدار الشهادة المحدثة.'),
-('doc-03', 'org-01', 'auth-03', 'رخصة نشاط تجاري — فرع جدة', 'رخصة بلدية', 'BAL-33812', 'أمانة محافظة جدة', 'spec-02', DATE_SUB(CURDATE(), INTERVAL 380 DAY), DATE_SUB(CURDATE(), INTERVAL 5 DAY), 'متأخرة منذ 5 أيام.'),
-('doc-04', 'org-01', 'auth-04', 'السجل التجاري الرئيسي', 'سجل نظامي', '1010558291', 'وزارة التجارة', 'spec-02', DATE_SUB(CURDATE(), INTERVAL 180 DAY), DATE_ADD(CURDATE(), INTERVAL 185 DAY), 'سارٍ ومحدث.'),
-('doc-05', 'org-01', 'auth-04', 'عقد تأسيس الشركة والملحق المعدل', 'وثيقة تأسيس', 'MOA-101055', 'وزارة التجارة — التوثيق', 'spec-01', DATE_SUB(CURDATE(), INTERVAL 900 DAY), NULL, 'وثيقة دائمة بلا تاريخ انتهاء.');
+INSERT INTO `document_categories` (`id`, `org_id`, `name`) VALUES
+('cat-health', 'org-01', 'تأمين صحي'),
+('cat-vehicles', 'org-01', 'تأمين مركبات'),
+('cat-municipal', 'org-01', 'رخص بلدية'),
+('cat-records', 'org-01', 'سجلات'),
+('cat-certs', 'org-01', 'شهادات'),
+('cat-iqamas', 'org-01', 'إقامات'),
+('cat-contracts', 'org-01', 'عقود');
+
+INSERT INTO `task_types` (`id`, `org_id`, `name`, `is_admin_kind`, `is_renewal_kind`) VALUES
+('ttype-judicial', 'org-01', 'قضائية', 0, 0),
+('ttype-admin', 'org-01', 'إدارية', 1, 0),
+('ttype-renewal', 'org-01', 'تجديد', 0, 1);
+
+INSERT INTO `documents` (`id`, `org_id`, `authority_id`, `category_id`, `name`, `doc_type`, `reference_number`, `issuing_authority`, `specialist_id`, `issue_date`, `expiry_date`, `notes`) VALUES
+('doc-01', 'org-01', 'auth-01', 'cat-municipal', 'رخصة الدفاع المدني — المقر الرئيسي', 'رخص بلدية', 'CD-992014', 'المديرية العامة للدفاع المدني', 'spec-02', DATE_SUB(CURDATE(), INTERVAL 350 DAY), DATE_ADD(CURDATE(), INTERVAL 14 DAY), 'يتطلب فحص طفايات الحريق وعقد الصيانة السنوي.'),
+('doc-02', 'org-01', 'auth-02', 'cat-certs', 'شهادة الزكاة والدخل السنوية', 'شهادات', 'ZATCA-441209', 'هيئة الزكاة والضريبة والجمارك', 'spec-04', DATE_SUB(CURDATE(), INTERVAL 365 DAY), CURDATE(), 'تنتهي اليوم — يجب سداد الفاتورة وإصدار الشهادة المحدثة.'),
+('doc-03', 'org-01', 'auth-03', 'cat-municipal', 'رخصة نشاط تجاري — فرع جدة', 'رخص بلدية', 'BAL-33812', 'أمانة محافظة جدة', 'spec-02', DATE_SUB(CURDATE(), INTERVAL 380 DAY), DATE_SUB(CURDATE(), INTERVAL 5 DAY), 'متأخرة منذ 5 أيام.'),
+('doc-04', 'org-01', 'auth-04', 'cat-records', 'السجل التجاري الرئيسي', 'سجلات', '1010558291', 'وزارة التجارة', 'spec-02', DATE_SUB(CURDATE(), INTERVAL 180 DAY), DATE_ADD(CURDATE(), INTERVAL 185 DAY), 'سارٍ ومحدث.'),
+('doc-05', 'org-01', 'auth-04', 'cat-contracts', 'عقد تأسيس الشركة والملحق المعدل', 'عقود', 'MOA-101055', 'وزارة التجارة — التوثيق', 'spec-01', DATE_SUB(CURDATE(), INTERVAL 900 DAY), NULL, 'وثيقة دائمة بلا تاريخ انتهاء.');
 
 INSERT INTO `document_renewals` (`id`, `document_id`, `previous_expiry_date`, `new_expiry_date`, `notes`, `actor_name`, `renewed_at`) VALUES
 ('ren-01', 'doc-01', DATE_SUB(CURDATE(), INTERVAL 715 DAY), DATE_ADD(CURDATE(), INTERVAL 14 DAY), 'تم التجديد السنوي السابق بعد مطابقة اشتراطات السلامة.', 'نورة الحربي', NOW());
 
-INSERT INTO `tasks` (`id`, `org_id`, `type`, `title`, `specialist_id`, `department_id`, `department_name`, `priority`, `status`, `due_date`, `actual_delivery_date`, `letter_number`, `authority_name`, `received_date`, `document_id`, `case_id`, `session_id`, `notes`) VALUES
-('task-01', 'org-01', 'قضائية', 'إعداد المذكرة الختامية لقضية التجهيزات المكتبية', 'spec-01', 'dept-01', 'الشؤون القانونية', 'عاجلة', 'قيد التنفيذ', CURDATE(), NULL, NULL, NULL, NULL, NULL, 'case-01', 'sess-01', 'تضمين جدول الفواتير وتقرير الاستلام.'),
-('task-02', 'org-01', 'إدارية', 'الرد على خطاب استفسار مكتب العمل رقم 1142', 'spec-03', 'dept-03', 'العمليات الإدارية', 'مرتفعة', 'قيد التنفيذ', DATE_SUB(CURDATE(), INTERVAL 3 DAY), NULL, 'خ-1142/1447', 'وزارة الموارد البشرية والتنمية الاجتماعية', DATE_SUB(CURDATE(), INTERVAL 8 DAY), NULL, NULL, NULL, 'تجهيز كشف العقود.'),
-('task-03', 'org-01', 'تجديد', 'استكمال فحص السلامة لتجديد رخصة الدفاع المدني', 'spec-02', 'dept-02', 'الوثائق والتراخيص', 'مرتفعة', 'جديدة', DATE_ADD(CURDATE(), INTERVAL 5 DAY), NULL, NULL, NULL, NULL, 'doc-01', NULL, NULL, 'مهمة مرتبطة بالرخصة.');
+INSERT INTO `tasks` (`id`, `org_id`, `type_id`, `type`, `title`, `specialist_id`, `department_id`, `department_name`, `priority`, `status`, `due_date`, `actual_delivery_date`, `letter_number`, `authority_name`, `received_date`, `document_id`, `case_id`, `session_id`, `notes`) VALUES
+('task-01', 'org-01', 'ttype-judicial', 'قضائية', 'إعداد المذكرة الختامية لقضية التجهيزات المكتبية', 'spec-01', 'dept-01', 'الشؤون القانونية', 'عاجلة', 'قيد التنفيذ', CURDATE(), NULL, NULL, NULL, NULL, NULL, 'case-01', 'sess-01', 'تضمين جدول الفواتير وتقرير الاستلام.'),
+('task-02', 'org-01', 'ttype-admin', 'إدارية', 'الرد على خطاب استفسار مكتب العمل رقم 1142', 'spec-03', 'dept-03', 'العمليات الإدارية', 'مرتفعة', 'قيد التنفيذ', DATE_SUB(CURDATE(), INTERVAL 3 DAY), NULL, 'خ-1142/1447', 'وزارة الموارد البشرية والتنمية الاجتماعية', DATE_SUB(CURDATE(), INTERVAL 8 DAY), NULL, NULL, NULL, 'تجهيز كشف العقود.'),
+('task-03', 'org-01', 'ttype-renewal', 'تجديد', 'استكمال فحص السلامة لتجديد رخصة الدفاع المدني', 'spec-02', 'dept-02', 'الوثائق والتراخيص', 'مرتفعة', 'جديدة', DATE_ADD(CURDATE(), INTERVAL 2 DAY), NULL, NULL, NULL, NULL, 'doc-01', NULL, NULL, 'مهمة مرتبطة بالرخصة.');

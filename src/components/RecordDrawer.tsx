@@ -20,6 +20,11 @@ import {
   getTodayISO,
 } from '../domain/dateUtils';
 import {
+  resolveDocumentCategoryName,
+  resolveTaskType,
+  resolveTaskTypeName,
+} from '../data/repository';
+import {
   CalendarItem,
   CaseItem,
   CaseStatus,
@@ -31,8 +36,8 @@ import {
   TaskItem,
   TaskPriority,
   TaskStatus,
-  TaskType,
 } from '../types/domain';
+import { ArabicDatePicker } from './ArabicDatePicker';
 import { LabelsSection } from './LabelsSection';
 import { StatusBadge } from './StatusBadge';
 
@@ -100,8 +105,18 @@ export const RecordDrawer: React.FC = () => {
       if (existing) {
         setTaskForm({ ...existing });
       } else {
+        const prefillType =
+          (prefill.typeId
+            ? db.taskTypes.find((tt) => tt.id === prefill.typeId)
+            : undefined) ||
+          (prefill.type
+            ? db.taskTypes.find((tt) => tt.name === prefill.type)
+            : undefined) ||
+          db.taskTypes.find((tt) => tt.isAdminKind) ||
+          db.taskTypes[0];
         setTaskForm({
-          type: (prefill.type as TaskType) || 'إدارية',
+          typeId: prefillType?.id || 'ttype-admin',
+          type: prefillType?.name || (prefill.type as string) || 'إدارية',
           title: (prefill.title as string) || '',
           specialistId: (prefill.specialistId as string | null) ?? db.preferences.currentSpecialistId,
           departmentName: (prefill.departmentName as string) || 'الشؤون القانونية',
@@ -125,9 +140,11 @@ export const RecordDrawer: React.FC = () => {
       if (existing) {
         setDocForm({ ...existing, noExpiry: !existing.expiryDate });
       } else {
+        const defaultCat = db.documentCategories[0] || null;
         setDocForm({
           name: '',
-          docType: 'ترخيص',
+          categoryId: defaultCat ? defaultCat.id : null,
+          docType: defaultCat ? defaultCat.name : 'غير مصنفة',
           referenceNumber: '',
           issuingAuthority: '',
           specialistId: db.preferences.currentSpecialistId,
@@ -238,13 +255,22 @@ export const RecordDrawer: React.FC = () => {
         setValidationError('موعد استحقاق المهمة مطلوب.');
         return;
       }
-      if (taskForm.type === 'إدارية' && !taskForm.authorityName?.trim()) {
+      const pickedTaskType = resolveTaskType(
+        { typeId: taskForm.typeId || '', type: taskForm.type || '' },
+        db.taskTypes
+      );
+      const isAdminTask =
+        !!pickedTaskType?.isAdminKind ||
+        taskForm.typeId === 'ttype-admin' ||
+        taskForm.type === 'إدارية';
+      if (isAdminTask && !taskForm.authorityName?.trim()) {
         setValidationError('في المهمة الإدارية يجب تحديد الجهة.');
         return;
       }
       const saved = saveTask({
         id: activeRecord.id ?? undefined,
-        type: (taskForm.type as TaskType) || 'إدارية',
+        typeId: pickedTaskType?.id || taskForm.typeId || db.taskTypes[0]?.id || 'ttype-admin',
+        type: pickedTaskType?.name || taskForm.type || 'إدارية',
         title: taskForm.title.trim(),
         specialistId: taskForm.specialistId || null,
         departmentName: taskForm.departmentName?.trim() || 'عام',
@@ -276,10 +302,14 @@ export const RecordDrawer: React.FC = () => {
         setValidationError('الجهة المصدرة مطلوبة.');
         return;
       }
+      const pickedCategory = docForm.categoryId
+        ? db.documentCategories.find((c) => c.id === docForm.categoryId)
+        : undefined;
       const saved = saveDocument({
         id: activeRecord.id ?? undefined,
         name: docForm.name.trim(),
-        docType: docForm.docType?.trim() || 'وثيقة',
+        categoryId: pickedCategory ? pickedCategory.id : null,
+        docType: pickedCategory ? pickedCategory.name : 'غير مصنفة',
         referenceNumber: docForm.referenceNumber?.trim() || '—',
         issuingAuthority: docForm.issuingAuthority.trim(),
         specialistId: docForm.specialistId || null,
@@ -487,6 +517,10 @@ export const RecordDrawer: React.FC = () => {
             </h2>
             {existingTask && (
               <div className="mt-1 flex flex-wrap items-center gap-2">
+                <StatusBadge
+                  label={resolveTaskTypeName(existingTask, db.taskTypes)}
+                  tone="neutral"
+                />
                 <StatusBadge label={existingTask.status} tone="info" />
                 {(() => {
                   const d = evaluateTaskDelay(existingTask, today);
@@ -502,6 +536,10 @@ export const RecordDrawer: React.FC = () => {
             )}
             {existingDoc && (
               <div className="mt-1 flex flex-wrap items-center gap-2">
+                <StatusBadge
+                  label={`التصنيف: ${resolveDocumentCategoryName(existingDoc, db.documentCategories)}`}
+                  tone="neutral"
+                />
                 {(() => {
                   const h = evaluateDocumentHealth(
                     existingDoc,
@@ -563,16 +601,30 @@ export const RecordDrawer: React.FC = () => {
                 <div>
                   <label className={labelClass}>نوع المهمة</label>
                   <select
-                    value={taskForm.type || 'إدارية'}
+                    value={
+                      resolveTaskType(
+                        { typeId: taskForm.typeId || '', type: taskForm.type || '' },
+                        db.taskTypes
+                      )?.id ||
+                      taskForm.typeId ||
+                      ''
+                    }
                     onChange={(e) => {
-                      setTaskForm({ ...taskForm, type: e.target.value as TaskType });
+                      const picked = db.taskTypes.find((tt) => tt.id === e.target.value);
+                      setTaskForm({
+                        ...taskForm,
+                        typeId: e.target.value,
+                        type: picked ? picked.name : taskForm.type || '',
+                      });
                       setIsDirty(true);
                     }}
                     className={inputClass}
                   >
-                    <option value="قضائية">قضائية</option>
-                    <option value="إدارية">إدارية</option>
-                    <option value="تجديد">تجديد</option>
+                    {db.taskTypes.map((tt) => (
+                      <option key={tt.id} value={tt.id}>
+                        {tt.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -658,36 +710,40 @@ export const RecordDrawer: React.FC = () => {
 
                 <div>
                   <label className={labelClass}>الموعد المستهدف *</label>
-                  <input
-                    type="date"
-                    lang="en"
-                    dir="ltr"
+                  <ArabicDatePicker
+                    mode="date"
+                    clearable={false}
+                    showHijri={showHijri}
                     value={taskForm.dueDate || ''}
-                    onChange={(e) => {
-                      setTaskForm({ ...taskForm, dueDate: e.target.value });
+                    onChange={(nextVal) => {
+                      setTaskForm({ ...taskForm, dueDate: nextVal });
                       setIsDirty(true);
                     }}
-                    className={inputClass}
+                    ariaLabel="الموعد المستهدف"
                   />
                 </div>
 
                 <div>
                   <label className={labelClass}>تاريخ التسليم الفعلي</label>
-                  <input
-                    type="date"
-                    lang="en"
-                    dir="ltr"
+                  <ArabicDatePicker
+                    mode="date"
+                    showHijri={showHijri}
                     value={taskForm.actualDeliveryDate || ''}
-                    onChange={(e) => {
-                      setTaskForm({ ...taskForm, actualDeliveryDate: e.target.value });
+                    onChange={(nextVal) => {
+                      setTaskForm({ ...taskForm, actualDeliveryDate: nextVal });
                       setIsDirty(true);
                     }}
-                    className={inputClass}
+                    ariaLabel="تاريخ التسليم الفعلي"
                   />
                 </div>
               </div>
 
-              {taskForm.type === 'إدارية' && (
+              {(resolveTaskType(
+                { typeId: taskForm.typeId || '', type: taskForm.type || '' },
+                db.taskTypes
+              )?.isAdminKind ||
+                taskForm.typeId === 'ttype-admin' ||
+                taskForm.type === 'إدارية') && (
                 <div className="glass-surface-subtle rounded-xl p-3.5 grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className={labelClass}>رقم الخطاب</label>
@@ -715,16 +771,15 @@ export const RecordDrawer: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelClass}>تاريخ الاستلام</label>
-                    <input
-                      type="date"
-                    lang="en"
-                    dir="ltr"
+                    <ArabicDatePicker
+                      mode="date"
+                      showHijri={showHijri}
                       value={taskForm.receivedDate || ''}
-                      onChange={(e) => {
-                        setTaskForm({ ...taskForm, receivedDate: e.target.value });
+                      onChange={(nextVal) => {
+                        setTaskForm({ ...taskForm, receivedDate: nextVal });
                         setIsDirty(true);
                       }}
-                      className={inputClass}
+                      ariaLabel="تاريخ الاستلام"
                     />
                   </div>
                 </div>
@@ -803,8 +858,13 @@ export const RecordDrawer: React.FC = () => {
                         showToast('احفظ التعديلات على الوثيقة أولًا أو ألغها.');
                         return;
                       }
+                      const renewalType =
+                        db.taskTypes.find((tt) => tt.isRenewalKind) ||
+                        db.taskTypes.find((tt) => tt.id === 'ttype-renewal') ||
+                        db.taskTypes[0];
                       openRecord('task', null, {
-                        type: 'تجديد',
+                        typeId: renewalType?.id || 'ttype-renewal',
+                        type: renewalType?.name || 'تجديد',
                         title: `تجديد: ${existingDoc.name}`,
                         documentId: existingDoc.id,
                         specialistId: existingDoc.specialistId,
@@ -867,27 +927,35 @@ export const RecordDrawer: React.FC = () => {
                       إلغاء
                     </button>
                   </div>
-                  <div className="text-xs text-teal-800 dark:text-teal-300">
-                    تاريخ الانتهاء السابق:{' '}
-                    <span className="font-semibold">
-                      {existingDoc.expiryDate
-                        ? formatDisplayDate(existingDoc.expiryDate, showHijri)
-                        : 'بلا تاريخ'}
+                  <div className="text-xs text-teal-800 dark:text-teal-300 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span>
+                      التصنيف:{' '}
+                      <span className="font-semibold">
+                        {resolveDocumentCategoryName(existingDoc, db.documentCategories)}
+                      </span>
+                    </span>
+                    <span>·</span>
+                    <span>
+                      تاريخ الانتهاء السابق:{' '}
+                      <span className="font-semibold">
+                        {existingDoc.expiryDate
+                          ? formatDisplayDate(existingDoc.expiryDate, showHijri)
+                          : 'بلا تاريخ'}
+                      </span>
                     </span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className={labelClass}>تاريخ الانتهاء الجديد *</label>
-                      <input
-                        type="date"
-                    lang="en"
-                    dir="ltr"
+                      <ArabicDatePicker
+                        mode="date"
+                        showHijri={showHijri}
                         value={renewalNewDate}
-                        onChange={(e) => {
-                          setRenewalNewDate(e.target.value);
+                        onChange={(nextVal) => {
+                          setRenewalNewDate(nextVal);
                           setRenewalError('');
                         }}
-                        className={inputClass}
+                        ariaLabel="تاريخ الانتهاء الجديد"
                       />
                     </div>
                     <div>
@@ -943,16 +1011,30 @@ export const RecordDrawer: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className={labelClass}>النوع</label>
-                  <input
-                    type="text"
-                    value={docForm.docType || ''}
+                  <label className={labelClass}>التصنيف</label>
+                  <select
+                    value={docForm.categoryId ?? ''}
                     onChange={(e) => {
-                      setDocForm({ ...docForm, docType: e.target.value });
+                      const nextId = e.target.value || null;
+                      const cat = nextId
+                        ? db.documentCategories.find((c) => c.id === nextId)
+                        : undefined;
+                      setDocForm({
+                        ...docForm,
+                        categoryId: nextId,
+                        docType: cat ? cat.name : 'غير مصنفة',
+                      });
                       setIsDirty(true);
                     }}
                     className={inputClass}
-                  />
+                  >
+                    <option value="">غير مصنفة</option>
+                    {db.documentCategories.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className={labelClass}>الرقم المرجعي</label>
@@ -998,31 +1080,29 @@ export const RecordDrawer: React.FC = () => {
                 </div>
                 <div>
                   <label className={labelClass}>تاريخ الإصدار</label>
-                  <input
-                    type="date"
-                    lang="en"
-                    dir="ltr"
+                  <ArabicDatePicker
+                    mode="date"
+                    showHijri={showHijri}
                     value={docForm.issueDate || ''}
-                    onChange={(e) => {
-                      setDocForm({ ...docForm, issueDate: e.target.value });
+                    onChange={(nextVal) => {
+                      setDocForm({ ...docForm, issueDate: nextVal });
                       setIsDirty(true);
                     }}
-                    className={inputClass}
+                    ariaLabel="تاريخ الإصدار"
                   />
                 </div>
                 <div>
                   <label className={labelClass}>تاريخ الانتهاء</label>
-                  <input
-                    type="date"
-                    lang="en"
-                    dir="ltr"
+                  <ArabicDatePicker
+                    mode="date"
                     disabled={!!docForm.noExpiry}
+                    showHijri={showHijri}
                     value={docForm.noExpiry ? '' : docForm.expiryDate || ''}
-                    onChange={(e) => {
-                      setDocForm({ ...docForm, expiryDate: e.target.value });
+                    onChange={(nextVal) => {
+                      setDocForm({ ...docForm, expiryDate: nextVal });
                       setIsDirty(true);
                     }}
-                    className={`${inputClass} disabled:opacity-50`}
+                    ariaLabel="تاريخ الانتهاء"
                   />
                   <label className="inline-flex items-center gap-2 mt-1.5 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
                     <input
@@ -1087,9 +1167,14 @@ export const RecordDrawer: React.FC = () => {
 
                   {/* Renewal History Log */}
                   <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
-                      <History className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                      <span>سجل التجديدات ({existingDoc.renewals.length})</span>
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-700 dark:text-slate-300">
+                      <div className="flex items-center gap-1.5">
+                        <History className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                        <span>سجل التجديدات ({existingDoc.renewals.length})</span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-md bg-teal-50 dark:bg-teal-950/50 text-teal-700 dark:text-teal-300 font-semibold">
+                        التصنيف: {resolveDocumentCategoryName(existingDoc, db.documentCategories)}
+                      </span>
                     </div>
                     {existingDoc.renewals.length === 0 ? (
                       <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -1318,16 +1403,16 @@ export const RecordDrawer: React.FC = () => {
 
                 <div>
                   <label className={labelClass}>الموعد والوقت *</label>
-                  <input
-                    type="datetime-local"
-                    lang="en"
-                    dir="ltr"
+                  <ArabicDatePicker
+                    mode="datetime"
+                    clearable={false}
+                    showHijri={showHijri}
                     value={sessionForm.scheduledAt || ''}
-                    onChange={(e) => {
-                      setSessionForm({ ...sessionForm, scheduledAt: e.target.value });
+                    onChange={(nextVal) => {
+                      setSessionForm({ ...sessionForm, scheduledAt: nextVal });
                       setIsDirty(true);
                     }}
-                    className={inputClass}
+                    ariaLabel="موعد ووقت الجلسة"
                   />
                 </div>
 
@@ -1499,31 +1584,29 @@ export const RecordDrawer: React.FC = () => {
                 </div>
                 <div>
                   <label className={labelClass}>تاريخ الإصدار</label>
-                  <input
-                    type="date"
-                    lang="en"
-                    dir="ltr"
+                  <ArabicDatePicker
+                    mode="date"
+                    showHijri={showHijri}
                     value={poaForm.issueDate || ''}
-                    onChange={(e) => {
-                      setPoaForm({ ...poaForm, issueDate: e.target.value });
+                    onChange={(nextVal) => {
+                      setPoaForm({ ...poaForm, issueDate: nextVal });
                       setIsDirty(true);
                     }}
-                    className={inputClass}
+                    ariaLabel="تاريخ إصدار الوكالة"
                   />
                 </div>
                 <div>
                   <label className={labelClass}>تاريخ الانتهاء</label>
-                  <input
-                    type="date"
-                    lang="en"
-                    dir="ltr"
+                  <ArabicDatePicker
+                    mode="date"
                     disabled={!!poaForm.noExpiry}
+                    showHijri={showHijri}
                     value={poaForm.noExpiry ? '' : poaForm.expiryDate || ''}
-                    onChange={(e) => {
-                      setPoaForm({ ...poaForm, expiryDate: e.target.value });
+                    onChange={(nextVal) => {
+                      setPoaForm({ ...poaForm, expiryDate: nextVal });
                       setIsDirty(true);
                     }}
-                    className={`${inputClass} disabled:opacity-50`}
+                    ariaLabel="تاريخ انتهاء الوكالة"
                   />
                   <label className="inline-flex items-center gap-2 mt-1.5 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
                     <input
@@ -1623,16 +1706,16 @@ export const RecordDrawer: React.FC = () => {
                 </div>
                 <div>
                   <label className={labelClass}>التاريخ والوقت *</label>
-                  <input
-                    type="datetime-local"
-                    lang="en"
-                    dir="ltr"
+                  <ArabicDatePicker
+                    mode="datetime"
+                    clearable={false}
+                    showHijri={showHijri}
                     value={calForm.scheduledAt || ''}
-                    onChange={(e) => {
-                      setCalForm({ ...calForm, scheduledAt: e.target.value });
+                    onChange={(nextVal) => {
+                      setCalForm({ ...calForm, scheduledAt: nextVal });
                       setIsDirty(true);
                     }}
-                    className={inputClass}
+                    ariaLabel="تاريخ ووقت الحدث"
                   />
                 </div>
                 <div>
@@ -1760,7 +1843,7 @@ export const RecordDrawer: React.FC = () => {
                     recordTitle: existingTask.title,
                     specialistId: existingTask.specialistId,
                     scheduledInfo: existingTask.dueDate,
-                    defaultMessage: `السلام عليكم، نرجو متابعة المهمة (${existingTask.type}):\n«${existingTask.title}»\nالموعد المستهدف: ${formatDisplayDate(existingTask.dueDate, showHijri)}`,
+                    defaultMessage: `السلام عليكم، نرجو متابعة المهمة (${resolveTaskTypeName(existingTask, db.taskTypes)}):\n«${existingTask.title}»\nالموعد المستهدف: ${formatDisplayDate(existingTask.dueDate, showHijri)}`,
                   })
                 }
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-blue-200 dark:border-blue-800 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/60"
@@ -1780,7 +1863,7 @@ export const RecordDrawer: React.FC = () => {
                     recordTitle: `تجديد وثيقة: ${existingDoc.name}`,
                     specialistId: existingDoc.specialistId,
                     scheduledInfo: existingDoc.expiryDate || 'بلا تاريخ',
-                    defaultMessage: `السلام عليكم، بخصوص تجديد الوثيقة:\n«${existingDoc.name}» (مرجع: ${existingDoc.referenceNumber})\nالجهة: ${existingDoc.issuingAuthority}\nتاريخ الانتهاء: ${existingDoc.expiryDate ? formatDisplayDate(existingDoc.expiryDate, showHijri) : 'بلا تاريخ'}`,
+                    defaultMessage: `السلام عليكم، بخصوص تجديد الوثيقة (${resolveDocumentCategoryName(existingDoc, db.documentCategories)}):\n«${existingDoc.name}» (مرجع: ${existingDoc.referenceNumber})\nالجهة: ${existingDoc.issuingAuthority}\nتاريخ الانتهاء: ${existingDoc.expiryDate ? formatDisplayDate(existingDoc.expiryDate, showHijri) : 'بلا تاريخ'}`,
                   })
                 }
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-teal-200 dark:border-teal-800 text-xs font-semibold text-teal-700 dark:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-950/60"

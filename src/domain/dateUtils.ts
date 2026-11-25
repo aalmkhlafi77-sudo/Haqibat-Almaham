@@ -281,3 +281,85 @@ export function evaluatePoaHealth(
   }
   return { label: 'سارية', isUrgent: false, isExpired: false };
 }
+
+export interface UrgentAlertResult {
+  isUrgentAlert: boolean;
+  daysRemaining: number | null;
+  kind: 'overdue' | 'today' | 'upcoming' | 'none';
+  badgeText: string | null;
+}
+
+/**
+ * Evaluates whether an active record falls within the configured urgent alert threshold (3 or 5 days).
+ * Completed, cancelled, or archived records NEVER trigger urgent motion alerts.
+ */
+export function evaluateUrgentAlert(
+  targetDateISO: string | null | undefined,
+  isTerminalOrArchived: boolean,
+  alertDays: 3 | 5 = 3,
+  todayISO = getTodayISO()
+): UrgentAlertResult {
+  if (isTerminalOrArchived || !targetDateISO) {
+    return {
+      isUrgentAlert: false,
+      daysRemaining: null,
+      kind: 'none',
+      badgeText: null,
+    };
+  }
+  const datePart = targetDateISO.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    return {
+      isUrgentAlert: false,
+      daysRemaining: null,
+      kind: 'none',
+      badgeText: null,
+    };
+  }
+
+  const diff = diffDaysISO(todayISO, datePart);
+  if (diff < 0) {
+    return {
+      isUrgentAlert: true,
+      daysRemaining: diff,
+      kind: 'overdue',
+      badgeText: 'تنبيه متأخر',
+    };
+  }
+  if (diff === 0) {
+    return {
+      isUrgentAlert: true,
+      daysRemaining: 0,
+      kind: 'today',
+      badgeText: 'يستحق اليوم',
+    };
+  }
+  if (diff <= alertDays) {
+    return {
+      isUrgentAlert: true,
+      daysRemaining: diff,
+      kind: 'upcoming',
+      badgeText:
+        diff === 1
+          ? 'قريب (غدًا)'
+          : `قريب (${toEnglishDigits(String(diff))} أيام)`,
+    };
+  }
+  return {
+    isUrgentAlert: false,
+    daysRemaining: diff,
+    kind: 'none',
+    badgeText: null,
+  };
+}
+
+export function getUrgentAlertMotionClass(
+  isUrgentAlert: boolean,
+  motionMode: 'repeat_5s' | 'continuous'
+): string {
+  if (!isUrgentAlert) return '';
+  return motionMode === 'continuous'
+    ? 'urgent-alert-continuous'
+    : 'urgent-alert-repeat-5s';
+}
+

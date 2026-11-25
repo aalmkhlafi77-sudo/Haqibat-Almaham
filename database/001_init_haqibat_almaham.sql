@@ -132,13 +132,40 @@ CREATE TABLE IF NOT EXISTS `poas` (
   CONSTRAINT `fk_poas_specialist` FOREIGN KEY (`specialist_id`) REFERENCES `specialists` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 8. الوثائق والتراخيص (تواريخ بلا وقت DATE، وتقبل NULL للوثائق بلا تاريخ)
+-- 7أ. تصنيفات الوثائق والتراخيص (قابلة للإضافة والتعديل والحذف)
+CREATE TABLE IF NOT EXISTS `document_categories` (
+  `id` VARCHAR(64) NOT NULL,
+  `org_id` VARCHAR(64) NOT NULL,
+  `name` VARCHAR(120) NOT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_doc_categories_org_name` (`org_id`, `name`),
+  CONSTRAINT `fk_doc_categories_org` FOREIGN KEY (`org_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 7ب. أنواع المهام (قابلة للإضافة والتعديل والحذف)
+CREATE TABLE IF NOT EXISTS `task_types` (
+  `id` VARCHAR(64) NOT NULL,
+  `org_id` VARCHAR(64) NOT NULL,
+  `name` VARCHAR(120) NOT NULL,
+  `is_admin_kind` TINYINT(1) NOT NULL DEFAULT 0,
+  `is_renewal_kind` TINYINT(1) NOT NULL DEFAULT 0,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_task_types_org_name` (`org_id`, `name`),
+  CONSTRAINT `fk_task_types_org` FOREIGN KEY (`org_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 8. الوثائق والتراخيص (تواريخ بلا وقت DATE، وتقبل NULL للوثائق بلا تاريخ أو غير المصنفة)
 CREATE TABLE IF NOT EXISTS `documents` (
   `id` VARCHAR(64) NOT NULL,
   `org_id` VARCHAR(64) NOT NULL,
   `authority_id` VARCHAR(64) NULL,
+  `category_id` VARCHAR(64) NULL,
   `name` VARCHAR(255) NOT NULL,
-  `doc_type` VARCHAR(120) NOT NULL,
+  `doc_type` VARCHAR(120) NOT NULL DEFAULT 'غير مصنفة',
   `reference_number` VARCHAR(120) NOT NULL,
   `issuing_authority` VARCHAR(255) NOT NULL,
   `specialist_id` VARCHAR(64) NULL,
@@ -150,11 +177,13 @@ CREATE TABLE IF NOT EXISTS `documents` (
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_documents_org_expiry` (`org_id`, `expiry_date`),
+  KEY `idx_documents_category` (`category_id`),
   KEY `idx_documents_specialist` (`specialist_id`),
   KEY `idx_documents_archived` (`archived_at`),
   KEY `idx_documents_ref` (`reference_number`),
   CONSTRAINT `fk_documents_org` FOREIGN KEY (`org_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_documents_authority` FOREIGN KEY (`authority_id`) REFERENCES `authorities` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_documents_category` FOREIGN KEY (`category_id`) REFERENCES `document_categories` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_documents_specialist` FOREIGN KEY (`specialist_id`) REFERENCES `specialists` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -172,11 +201,12 @@ CREATE TABLE IF NOT EXISTS `document_renewals` (
   CONSTRAINT `fk_renewals_document` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 10. المهام (قضائية، إدارية، تجديد)
+-- 10. المهام (ترتبط بجدول task_types الديناميكي مع حفظ document_id للتجديد)
 CREATE TABLE IF NOT EXISTS `tasks` (
   `id` VARCHAR(64) NOT NULL,
   `org_id` VARCHAR(64) NOT NULL,
-  `type` ENUM('قضائية', 'إدارية', 'تجديد') NOT NULL,
+  `type_id` VARCHAR(64) NOT NULL,
+  `type` VARCHAR(120) NOT NULL,
   `title` VARCHAR(255) NOT NULL,
   `specialist_id` VARCHAR(64) NULL,
   `department_id` VARCHAR(64) NULL,
@@ -198,10 +228,11 @@ CREATE TABLE IF NOT EXISTS `tasks` (
   PRIMARY KEY (`id`),
   KEY `idx_tasks_specialist_status` (`specialist_id`, `status`),
   KEY `idx_tasks_due_date` (`due_date`),
-  KEY `idx_tasks_type` (`type`),
+  KEY `idx_tasks_type_id` (`type_id`),
   KEY `idx_tasks_document` (`document_id`),
   KEY `idx_tasks_case` (`case_id`),
   CONSTRAINT `fk_tasks_org` FOREIGN KEY (`org_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_tasks_type` FOREIGN KEY (`type_id`) REFERENCES `task_types` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_tasks_specialist` FOREIGN KEY (`specialist_id`) REFERENCES `specialists` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_tasks_dept` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_tasks_document` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE SET NULL,
@@ -232,7 +263,7 @@ CREATE TABLE IF NOT EXISTS `calendar_items` (
   CONSTRAINT `fk_cal_specialist` FOREIGN KEY (`specialist_id`) REFERENCES `specialists` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 12. الملصقات الملونة
+-- 12. الملصقات الملونة (مع إحداثيات التموضع وخيار لفت الانتباه)
 CREATE TABLE IF NOT EXISTS `labels` (
   `id` VARCHAR(64) NOT NULL,
   `target_type` ENUM('today', 'task', 'case', 'document') NOT NULL,
@@ -240,6 +271,9 @@ CREATE TABLE IF NOT EXISTS `labels` (
   `text` VARCHAR(255) NOT NULL,
   `bg_color` VARCHAR(16) NOT NULL,
   `text_color` VARCHAR(16) NOT NULL,
+  `pos_x` INT NULL,
+  `pos_y` INT NULL,
+  `attention_pulse` TINYINT(1) NOT NULL DEFAULT 0,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),

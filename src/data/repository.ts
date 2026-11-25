@@ -1,3 +1,5 @@
+import { getTodayISO } from '../domain/dateUtils';
+import { normalizeArabicSearchText } from '../domain/searchUtils';
 import {
   buildLegacyVat3ARulesSnapshot,
   evaluateVat3ADraft,
@@ -7,6 +9,7 @@ import {
   AppPreferences,
   CalendarItem,
   CaseItem,
+  DocumentCategoryItem,
   DocumentItem,
   DocumentRenewal,
   LabelItem,
@@ -15,9 +18,15 @@ import {
   ShareLog,
   Specialist,
   TaskItem,
+  TaskTypeItem,
   Vat3ADraft,
 } from '../types/domain';
-import { buildDefaultPreferences, createSeedDatabase } from './seedData';
+import {
+  buildDefaultPreferences,
+  buildInitialDocumentCategories,
+  buildInitialTaskTypes,
+  createSeedDatabase,
+} from './seedData';
 
 const STORAGE_KEY = 'haqibat_almaham_db_v1';
 
@@ -34,11 +43,250 @@ export interface DeleteOperationResult {
   state: AppDatabaseState;
 }
 
+export function resolveDocumentCategoryName(
+  doc: Pick<DocumentItem, 'categoryId' | 'docType'>,
+  categories: DocumentCategoryItem[]
+): string {
+  if (doc.categoryId) {
+    const found = categories.find((c) => c.id === doc.categoryId);
+    if (found) return found.name;
+  }
+  return 'غير مصنفة';
+}
+
+export function resolveTaskType(
+  task: Pick<TaskItem, 'typeId' | 'type'>,
+  taskTypes: TaskTypeItem[]
+): TaskTypeItem | undefined {
+  if (task.typeId) {
+    const byId = taskTypes.find((t) => t.id === task.typeId);
+    if (byId) return byId;
+  }
+  const norm = normalizeArabicSearchText(task.type || '');
+  return taskTypes.find((t) => normalizeArabicSearchText(t.name) === norm);
+}
+
+export function resolveTaskTypeName(
+  task: Pick<TaskItem, 'typeId' | 'type'>,
+  taskTypes: TaskTypeItem[]
+): string {
+  return resolveTaskType(task, taskTypes)?.name || task.type || 'مهمة';
+}
+
+const LEGACY_CATEGORY_SYNONYMS: Array<{ keywords: string[]; categoryId: string }> = [
+  { keywords: ['تامين صحي', 'تامين طبي'], categoryId: 'cat-health' },
+  { keywords: ['تامين مركبات', 'تامين سيارات'], categoryId: 'cat-vehicles' },
+  { keywords: ['رخص بلديه', 'رخصه بلديه'], categoryId: 'cat-municipal' },
+  { keywords: ['سجلات', 'سجل تجاري'], categoryId: 'cat-records' },
+  { keywords: ['شهادات', 'شهاده'], categoryId: 'cat-certs' },
+  { keywords: ['اقامات', 'اقامه'], categoryId: 'cat-iqamas' },
+  { keywords: ['عقود', 'عقد'], categoryId: 'cat-contracts' },
+];
+
+/**
+ * Pure, idempotent migration helper used both by LocalStorageDataAdapter
+ * and automated test verification for legacy stored records.
+ */
+export function migrateDatabaseState(
+  parsed: Partial<AppDatabaseState>,
+  nowIso = `${getTodayISO()}T09:00:00`
+): AppDatabaseState {
+  const fallback = createSeedDatabase();
+  const defaultPrefs = buildDefaultPreferences();
+
+  // 1. Document Categories + legacy doc.docType migration
+  const categories: DocumentCategoryItem[] = Array.isArray(parsed.documentCategories)
+    ? parsed.documentCategories.map((c) => ({ ...c }))
+    : buildInitialDocumentCategories(nowIso);
+
+  const rawDocs = parsed.documents ?? fallback.documents;
+  const migratedDocs: DocumentItem[] = rawDocs.map((doc) => {
+    // Explicit null means uncategorized; undefined means legacy record needing migration
+    if (doc.categoryId !== undefined) {
+      const cat = doc.categoryId ? categories.find((c) => c.id === doc.categoryId) : undefined;
+      return {
+        ...doc,
+        categoryId: cat ? cat.id : doc.categoryId === null ? null : null,
+        docType: cat ? cat.name : 'غير مصنفة',
+      };
+    }
+
+    const rawType = (doc.docType || '').trim();
+    if (!rawType || rawType === 'غير مصنفة') {
+      return { ...doc, categoryId: null, docType: 'غير مصنفة' };
+    }
+
+    const norm = normalizeArabicSearchText(rawType);
+
+    // First try exact match against current categories
+    let matched = categories.find((c) => normalizeArabicSearchText(c.name) === norm);
+
+    // Next check close singular/plural match for default categories ONLY if exact name matches known singular/plural pair
+    if (!matched) {
+      const syn = LEGACY_CATEGORY_SYNONYMS.find((entry) =>
+        entry.keywords.includes(norm)
+      );
+      if (syn) {
+        matched = categories.find((c) => c.id === syn.categoryId);
+      }
+    }
+
+    // Preserve distinct legacy names (e.g. 'ترخيص سلامة', 'شهادة امتثال', 'سجل نظامي', 'وثيقة تأسيس', 'بوليصة تأمين')
+    if (!matched) {
+      const newId = `cat-mig-${categories.length + 1}-${Math.abs(
+        Array.from(norm).reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) | 0, 7)
+      ).toString(36)}`;
+      matched = {
+        id: newId,
+        orgId: doc.orgId || 'org-01',
+        name: rawType,
+        createdAt: doc.createdAt || nowIso,
+        updatedAt: nowIso,
+      };
+      categories.push(matched);
+    }
+
+    return {
+      ...doc,
+      categoryId: matched.id,
+      docType: matched.name,
+    };
+  });
+
+  // 2. Task Types + legacy task.type migration
+  const taskTypes: TaskTypeItem[] = Array.isArray(parsed.taskTypes)
+    ? parsed.taskTypes.map((tt) => ({ ...tt }))
+    : buildInitialTaskTypes(nowIso);
+
+  const rawTasks = parsed.tasks ?? fallback.tasks;
+  const migratedTasks: TaskItem[] = rawTasks.map((t) => {
+    if (t.typeId) {
+      const matched = taskTypes.find((tt) => tt.id === t.typeId);
+      if (matched) {
+        return { ...t, type: matched.name };
+      }
+    }
+    const normType = normalizeArabicSearchText(t.type || '');
+    let matched = taskTypes.find((tt) => normalizeArabicSearchText(tt.name) === normType);
+    if (!matched && t.documentId) {
+      matched = taskTypes.find((tt) => tt.isRenewalKind) || taskTypes[0];
+    }
+    if (!matched) {
+      matched = taskTypes[0];
+    }
+    return {
+      ...t,
+      typeId: matched.id,
+      type: matched.name,
+    };
+  });
+
+  // 3. VAT 3A drafts snapshot migration
+  const migratedVatDrafts: Vat3ADraft[] = (
+    parsed.vat3aDrafts ?? fallback.vat3aDrafts
+  ).map((d) => {
+    if (d.rulesSnapshot) return d;
+    const legacy = buildLegacyVat3ARulesSnapshot();
+    const m: Vat3ADraft = {
+      ...d,
+      rulesSnapshot: legacy,
+    };
+    m.computedNetHalalas = evaluateVat3ADraft(m).v16Halalas;
+    return m;
+  });
+
+  // 4. Labels migration (position + attentionPulse)
+  const migratedLabels: LabelItem[] = (parsed.labels ?? fallback.labels).map((l) => ({
+    ...l,
+    posX: l.posX ?? null,
+    posY: l.posY ?? null,
+    attentionPulse: !!l.attentionPulse,
+  }));
+
+  // 5. Preferences & filter migration
+  const rawTaskTypeFilter = parsed.preferences?.taskFilters?.type ?? defaultPrefs.taskFilters.type;
+  let migratedTaskTypeFilter = rawTaskTypeFilter;
+  if (rawTaskTypeFilter && rawTaskTypeFilter !== 'الكل') {
+    const byId = taskTypes.find((tt) => tt.id === rawTaskTypeFilter);
+    if (!byId) {
+      const normF = normalizeArabicSearchText(rawTaskTypeFilter);
+      const byName = taskTypes.find((tt) => normalizeArabicSearchText(tt.name) === normF);
+      migratedTaskTypeFilter = byName ? byName.id : 'الكل';
+    }
+  }
+
+  const rawAlertDays = parsed.preferences?.urgentAlertDays;
+  const urgentAlertDays: 3 | 5 = rawAlertDays === 5 ? 5 : 3;
+  const rawAlertMotion = parsed.preferences?.urgentAlertMotion;
+  const urgentAlertMotion: 'repeat_5s' | 'continuous' =
+    rawAlertMotion === 'continuous' ? 'continuous' : 'repeat_5s';
+
+  return {
+    organizations: parsed.organizations ?? fallback.organizations,
+    specialists: parsed.specialists ?? fallback.specialists,
+    documentCategories: categories,
+    taskTypes,
+    tasks: migratedTasks,
+    documents: migratedDocs,
+    cases: parsed.cases ?? fallback.cases,
+    sessions: parsed.sessions ?? fallback.sessions,
+    poas: parsed.poas ?? fallback.poas,
+    calendarItems: parsed.calendarItems ?? fallback.calendarItems,
+    labels: migratedLabels,
+    shareLogs: parsed.shareLogs ?? fallback.shareLogs,
+    vat3aDrafts: migratedVatDrafts,
+    preferences: {
+      ...defaultPrefs,
+      ...(parsed.preferences || {}),
+      urgentAlertDays,
+      urgentAlertMotion,
+      vat3aRules: {
+        ...defaultPrefs.vat3aRules,
+        ...(parsed.preferences?.vat3aRules || {}),
+        lineRules: {
+          ...defaultPrefs.vat3aRules.lineRules,
+          ...(parsed.preferences?.vat3aRules?.lineRules || {}),
+        },
+      },
+      integrations: {
+        ...defaultPrefs.integrations,
+        ...(parsed.preferences?.integrations || {}),
+      },
+      taskFilters: {
+        ...defaultPrefs.taskFilters,
+        ...(parsed.preferences?.taskFilters || {}),
+        type: migratedTaskTypeFilter,
+      },
+      documentFilters: {
+        ...defaultPrefs.documentFilters,
+        ...(parsed.preferences?.documentFilters || {}),
+        categoryId: parsed.preferences?.documentFilters?.categoryId ?? 'الكل',
+      },
+      vatArchiveFilters: {
+        ...defaultPrefs.vatArchiveFilters,
+        ...(parsed.preferences?.vatArchiveFilters || {}),
+      },
+      collapsedSections: parsed.preferences?.collapsedSections ?? {},
+      navGroupCollapsed: parsed.preferences?.navGroupCollapsed ?? {},
+    },
+  };
+}
+
 export interface DataRepository {
   load(): AppDatabaseState;
   save(state: AppDatabaseState): void;
   resetToDemo(): AppDatabaseState;
   updatePreferences(partial: Partial<AppPreferences>): AppDatabaseState;
+  upsertDocumentCategory(cat: DocumentCategoryItem): AppDatabaseState;
+  deleteDocumentCategory(
+    categoryId: string,
+    replacementCategoryId: string | null
+  ): AppDatabaseState;
+  upsertTaskType(tt: TaskTypeItem): AppDatabaseState;
+  deleteTaskType(
+    typeId: string,
+    replacementTypeId: string
+  ): DeleteOperationResult;
   upsertTask(task: TaskItem): AppDatabaseState;
   deleteTask(taskId: string): AppDatabaseState;
   upsertDocument(doc: DocumentItem): AppDatabaseState;
@@ -75,68 +323,7 @@ class LocalStorageDataAdapter implements DataRepository {
         return seeded;
       }
       const parsed = JSON.parse(raw) as Partial<AppDatabaseState>;
-      const fallback = createSeedDatabase();
-      const defaultPrefs = buildDefaultPreferences();
-
-      // Migrate old VAT 3A drafts that lacked rulesSnapshot -> attach legacy snapshot so saved totals stay preserved
-      const migratedVatDrafts: Vat3ADraft[] = (
-        parsed.vat3aDrafts ?? fallback.vat3aDrafts
-      ).map((d) => {
-        if (d.rulesSnapshot) return d;
-        const legacy = buildLegacyVat3ARulesSnapshot();
-        const migrated: Vat3ADraft = {
-          ...d,
-          rulesSnapshot: legacy,
-        };
-        migrated.computedNetHalalas = evaluateVat3ADraft(migrated).v16Halalas;
-        return migrated;
-      });
-
-      const migrated: AppDatabaseState = {
-        organizations: parsed.organizations ?? fallback.organizations,
-        specialists: parsed.specialists ?? fallback.specialists,
-        tasks: parsed.tasks ?? fallback.tasks,
-        documents: parsed.documents ?? fallback.documents,
-        cases: parsed.cases ?? fallback.cases,
-        sessions: parsed.sessions ?? fallback.sessions,
-        poas: parsed.poas ?? fallback.poas,
-        calendarItems: parsed.calendarItems ?? fallback.calendarItems,
-        labels: parsed.labels ?? fallback.labels,
-        shareLogs: parsed.shareLogs ?? fallback.shareLogs,
-        vat3aDrafts: migratedVatDrafts,
-        preferences: {
-          ...defaultPrefs,
-          ...(parsed.preferences || {}),
-          vat3aRules: {
-            ...defaultPrefs.vat3aRules,
-            ...(parsed.preferences?.vat3aRules || {}),
-            lineRules: {
-              ...defaultPrefs.vat3aRules.lineRules,
-              ...(parsed.preferences?.vat3aRules?.lineRules || {}),
-            },
-          },
-          integrations: {
-            ...defaultPrefs.integrations,
-            ...(parsed.preferences?.integrations || {}),
-          },
-          taskFilters: {
-            ...defaultPrefs.taskFilters,
-            ...(parsed.preferences?.taskFilters || {}),
-          },
-          documentFilters: {
-            ...defaultPrefs.documentFilters,
-            ...(parsed.preferences?.documentFilters || {}),
-          },
-          vatArchiveFilters: {
-            ...defaultPrefs.vatArchiveFilters,
-            ...(parsed.preferences?.vatArchiveFilters || {}),
-          },
-          collapsedSections: parsed.preferences?.collapsedSections ?? {},
-          navGroupCollapsed: parsed.preferences?.navGroupCollapsed ?? {},
-        },
-      };
-
-      return migrated;
+      return migrateDatabaseState(parsed);
     } catch {
       const seeded = createSeedDatabase();
       this.save(seeded);
@@ -172,12 +359,147 @@ class LocalStorageDataAdapter implements DataRepository {
     return next;
   }
 
+  upsertDocumentCategory(cat: DocumentCategoryItem): AppDatabaseState {
+    const state = this.readRaw();
+    const exists = state.documentCategories.some((c) => c.id === cat.id);
+    const documentCategories = exists
+      ? state.documentCategories.map((c) => (c.id === cat.id ? cat : c))
+      : [...state.documentCategories, cat];
+    // Sync cached docType on linked documents (renewals history stays completely untouched)
+    const documents = state.documents.map((d) =>
+      d.categoryId === cat.id ? { ...d, docType: cat.name } : d
+    );
+    const next = { ...state, documentCategories, documents };
+    this.save(next);
+    return next;
+  }
+
+  deleteDocumentCategory(
+    categoryId: string,
+    replacementCategoryId: string | null
+  ): AppDatabaseState {
+    const state = this.readRaw();
+    const replacement = replacementCategoryId
+      ? state.documentCategories.find(
+          (c) => c.id === replacementCategoryId && c.id !== categoryId
+        ) || null
+      : null;
+
+    const documentCategories = state.documentCategories.filter(
+      (c) => c.id !== categoryId
+    );
+
+    // NEVER delete linked documents; either reassign to replacement or clear categoryId to null
+    const documents = state.documents.map((doc) => {
+      if (doc.categoryId !== categoryId) return doc;
+      return {
+        ...doc,
+        categoryId: replacement ? replacement.id : null,
+        docType: replacement ? replacement.name : 'غير مصنفة',
+      };
+    });
+
+    const currFilterCatId = state.preferences.documentFilters.categoryId;
+    const nextFilterCatId =
+      currFilterCatId === categoryId
+        ? replacement
+          ? replacement.id
+          : 'الكل'
+        : currFilterCatId;
+
+    const next: AppDatabaseState = {
+      ...state,
+      documentCategories,
+      documents,
+      preferences: {
+        ...state.preferences,
+        documentFilters: {
+          ...state.preferences.documentFilters,
+          categoryId: nextFilterCatId,
+        },
+      },
+    };
+    this.save(next);
+    return next;
+  }
+
+  upsertTaskType(tt: TaskTypeItem): AppDatabaseState {
+    const state = this.readRaw();
+    const exists = state.taskTypes.some((x) => x.id === tt.id);
+    const taskTypes = exists
+      ? state.taskTypes.map((x) => (x.id === tt.id ? tt : x))
+      : [...state.taskTypes, tt];
+    // Sync cached type string on tasks while preserving documentId / caseId / sessionId links
+    const tasks = state.tasks.map((t) =>
+      t.typeId === tt.id ? { ...t, type: tt.name } : t
+    );
+    const next = { ...state, taskTypes, tasks };
+    this.save(next);
+    return next;
+  }
+
+  deleteTaskType(
+    typeId: string,
+    replacementTypeId: string
+  ): DeleteOperationResult {
+    const state = this.readRaw();
+    if (state.taskTypes.length <= 1) {
+      return {
+        ok: false,
+        error: 'يجب الإبقاء على نوع واحد على الأقل للمهام.',
+        state,
+      };
+    }
+    const replacement = state.taskTypes.find(
+      (tt) => tt.id === replacementTypeId && tt.id !== typeId
+    );
+    if (!replacement) {
+      return {
+        ok: false,
+        error: 'اختر نوعًا بديلًا لنقل المهام المرتبطة قبل الحذف.',
+        state,
+      };
+    }
+
+    const taskTypes = state.taskTypes.filter((tt) => tt.id !== typeId);
+    const tasks = state.tasks.map((t) =>
+      t.typeId === typeId
+        ? { ...t, typeId: replacement.id, type: replacement.name }
+        : t
+    );
+
+    const nextFilterType =
+      state.preferences.taskFilters.type === typeId
+        ? 'الكل'
+        : state.preferences.taskFilters.type;
+
+    const next: AppDatabaseState = {
+      ...state,
+      taskTypes,
+      tasks,
+      preferences: {
+        ...state.preferences,
+        taskFilters: {
+          ...state.preferences.taskFilters,
+          type: nextFilterType,
+        },
+      },
+    };
+    this.save(next);
+    return { ok: true, state: next };
+  }
+
   upsertTask(task: TaskItem): AppDatabaseState {
     const state = this.readRaw();
-    const exists = state.tasks.some((t) => t.id === task.id);
+    const tt = state.taskTypes.find((x) => x.id === task.typeId);
+    const syncedTask: TaskItem = {
+      ...task,
+      type: tt ? tt.name : task.type,
+    };
+    const exists = state.tasks.some((t) => t.id === syncedTask.id);
     const tasks = exists
-      ? state.tasks.map((t) => (t.id === task.id ? task : t))
-      : [task, ...state.tasks];
+      ? state.tasks.map((t) => (t.id === syncedTask.id ? syncedTask : t))
+      : [syncedTask, ...state.tasks];
     const next = { ...state, tasks };
     this.save(next);
     return next;
@@ -203,10 +525,18 @@ class LocalStorageDataAdapter implements DataRepository {
 
   upsertDocument(doc: DocumentItem): AppDatabaseState {
     const state = this.readRaw();
-    const exists = state.documents.some((d) => d.id === doc.id);
+    const cat = doc.categoryId
+      ? state.documentCategories.find((c) => c.id === doc.categoryId)
+      : undefined;
+    const syncedDoc: DocumentItem = {
+      ...doc,
+      categoryId: cat ? cat.id : null,
+      docType: cat ? cat.name : 'غير مصنفة',
+    };
+    const exists = state.documents.some((d) => d.id === syncedDoc.id);
     const documents = exists
-      ? state.documents.map((d) => (d.id === doc.id ? doc : d))
-      : [doc, ...state.documents];
+      ? state.documents.map((d) => (d.id === syncedDoc.id ? syncedDoc : d))
+      : [syncedDoc, ...state.documents];
     const next = { ...state, documents };
     this.save(next);
     return next;

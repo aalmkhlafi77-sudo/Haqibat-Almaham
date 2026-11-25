@@ -7,7 +7,9 @@ import {
   Share2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { resolveTaskTypeName } from '../data/repository';
 import {
+  evaluateUrgentAlert,
   formatDateTime,
   formatDisplayDate,
   formatGregorianMonthHeader,
@@ -15,6 +17,7 @@ import {
   formatHijriMonthHeader,
   formatTimeFromDateTime,
   getTodayISO,
+  getUrgentAlertMotionClass,
   toEnglishDigits,
 } from '../domain/dateUtils';
 import { RecordType } from '../types/domain';
@@ -33,6 +36,7 @@ interface CalendarEntry {
   heatCategory: HeatmapCategory;
   timeText?: string;
   specialistId: string | null;
+  isTerminal: boolean;
 }
 
 const HEATMAP_CATEGORY_META: Record<
@@ -91,6 +95,7 @@ export const CalendarView: React.FC = () => {
         heatCategory: 'sessions_events',
         timeText: formatTimeFromDateTime(s.scheduledAt),
         specialistId: s.specialistId,
+        isTerminal: s.status === 'منعقدة' || s.status === 'ملغاة',
       });
     }
 
@@ -100,12 +105,13 @@ export const CalendarView: React.FC = () => {
         id: `task-${t.id}`,
         dateISO: t.dueDate,
         title: t.title,
-        kindLabel: `مهمة (${t.type})`,
+        kindLabel: `مهمة (${resolveTaskTypeName(t, db.taskTypes)})`,
         recordType: 'task',
         recordId: t.id,
         tone: 'info',
         heatCategory: 'tasks',
         specialistId: t.specialistId,
+        isTerminal: t.status === 'مكتملة' || t.status === 'ملغاة',
       });
     }
 
@@ -121,6 +127,7 @@ export const CalendarView: React.FC = () => {
         tone: d.expiryDate < today ? 'danger' : 'warning',
         heatCategory: 'documents',
         specialistId: d.specialistId,
+        isTerminal: false,
       });
     }
 
@@ -136,6 +143,7 @@ export const CalendarView: React.FC = () => {
         tone: 'gold',
         heatCategory: 'cases_poas',
         specialistId: p.specialistId,
+        isTerminal: p.statusOverride === 'مفسوخة',
       });
     }
 
@@ -151,11 +159,12 @@ export const CalendarView: React.FC = () => {
         heatCategory: 'sessions_events',
         timeText: ci.isAllDay ? undefined : formatTimeFromDateTime(ci.scheduledAt),
         specialistId: ci.specialistId,
+        isTerminal: ci.isDone,
       });
     }
 
     return list;
-  }, [db.sessions, db.tasks, db.documents, db.poas, db.calendarItems, today]);
+  }, [db.sessions, db.tasks, db.taskTypes, db.documents, db.poas, db.calendarItems, today]);
 
   const monthLabel = formatGregorianMonthHeader(viewDate.year, viewDate.month);
   const hijriMonthLabel = showHijri
@@ -390,10 +399,20 @@ export const CalendarView: React.FC = () => {
               <div className="space-y-2">
                 {dayEntries.map((item) => {
                   const dotMeta = HEATMAP_CATEGORY_META[item.heatCategory];
+                  const urgent = evaluateUrgentAlert(
+                    item.dateISO,
+                    item.isTerminal,
+                    db.preferences.urgentAlertDays,
+                    today
+                  );
+                  const motionClass = getUrgentAlertMotionClass(
+                    urgent.isUrgentAlert,
+                    db.preferences.urgentAlertMotion
+                  );
                   return (
                     <div
                       key={item.id}
-                      className="glass-surface-subtle rounded-xl p-3 flex items-start justify-between gap-2"
+                      className={`glass-surface-subtle rounded-xl p-3 flex items-start justify-between gap-2 ${motionClass}`}
                     >
                       <div className="flex items-start gap-2.5 min-w-0">
                         <span
@@ -416,7 +435,14 @@ export const CalendarView: React.FC = () => {
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                        {urgent.isUrgentAlert && urgent.badgeText && (
+                          <StatusBadge
+                            label={urgent.badgeText}
+                            tone={urgent.kind === 'today' ? 'today' : 'warning'}
+                            icon="clock"
+                          />
+                        )}
                         <StatusBadge label={item.kindLabel} tone={item.tone} />
                         {item.recordType === 'calendar_item' && (
                           <button
@@ -455,26 +481,38 @@ export const CalendarView: React.FC = () => {
               أقرب المواعيد القادمة (
               <span className="font-mono-tabular">{toEnglishDigits(String(upcomingEntries.length))}</span>)
             </h2>
-            <div className="divide-y divide-slate-100 dark:divide-white/10">
-              {upcomingEntries.map((item) => (
-                <button
-                  key={`up-${item.id}`}
-                  type="button"
-                  onClick={() => openRecord(item.recordType, item.recordId)}
-                  className="w-full text-right py-2 first:pt-0 last:pb-0 flex items-center justify-between gap-2 hover:opacity-80"
-                >
-                  <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate flex items-center gap-2">
-                    <span
-                      className="w-2 h-2 rounded-full shrink-0"
-                      style={{ backgroundColor: HEATMAP_CATEGORY_META[item.heatCategory].dotColor }}
-                    />
-                    <span className="truncate">{item.title}</span>
-                  </span>
-                  <span className="text-[11px] font-mono-tabular text-slate-500 dark:text-slate-400 shrink-0">
-                    {formatDisplayDate(item.dateISO, showHijri)}
-                  </span>
-                </button>
-              ))}
+            <div className="space-y-1.5">
+              {upcomingEntries.map((item) => {
+                const urgent = evaluateUrgentAlert(
+                  item.dateISO,
+                  item.isTerminal,
+                  db.preferences.urgentAlertDays,
+                  today
+                );
+                const motionClass = getUrgentAlertMotionClass(
+                  urgent.isUrgentAlert,
+                  db.preferences.urgentAlertMotion
+                );
+                return (
+                  <button
+                    key={`up-${item.id}`}
+                    type="button"
+                    onClick={() => openRecord(item.recordType, item.recordId)}
+                    className={`w-full text-right px-2.5 py-2 rounded-lg border border-transparent flex items-center justify-between gap-2 hover:bg-slate-50 dark:hover:bg-white/5 ${motionClass}`}
+                  >
+                    <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate flex items-center gap-2">
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: HEATMAP_CATEGORY_META[item.heatCategory].dotColor }}
+                      />
+                      <span className="truncate">{item.title}</span>
+                    </span>
+                    <span className="text-[11px] font-mono-tabular text-slate-500 dark:text-slate-400 shrink-0">
+                      {formatDisplayDate(item.dateISO, showHijri)}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

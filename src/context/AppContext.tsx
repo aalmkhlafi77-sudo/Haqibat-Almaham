@@ -5,6 +5,7 @@ import {
   AppPreferences,
   CalendarItem,
   CaseItem,
+  DocumentCategoryItem,
   DocumentFilters,
   DocumentItem,
   DocumentRenewal,
@@ -19,7 +20,10 @@ import {
   Specialist,
   TaskFilters,
   TaskItem,
+  TaskTypeItem,
   ThemeMode,
+  UrgentAlertDays,
+  UrgentAlertMotionMode,
   Vat3AArchiveFilters,
   Vat3ADraft,
   Vat3ARulesConfig,
@@ -58,6 +62,8 @@ interface AppContextValue {
   setShowHijri: (show: boolean) => void;
   setCurrentSpecialistId: (id: string) => void;
   setDocumentWarningDays: (days: number) => void;
+  setUrgentAlertDays: (days: UrgentAlertDays) => void;
+  setUrgentAlertMotion: (mode: UrgentAlertMotionMode) => void;
   setVat3ARules: (rules: Vat3ARulesConfig) => void;
   updateIntegrations: (partial: Partial<IntegrationSettings>) => void;
   testServerConnection: (baseUrl: string) => Promise<void>;
@@ -68,6 +74,24 @@ interface AppContextValue {
   updateTaskFilters: (partial: Partial<TaskFilters>) => void;
   updateDocumentFilters: (partial: Partial<DocumentFilters>) => void;
   updateVatArchiveFilters: (partial: Partial<Vat3AArchiveFilters>) => void;
+  saveDocumentCategory: (input: { id?: string; name: string }) => DocumentCategoryItem | null;
+  deleteDocumentCategory: (categoryId: string, replacementCategoryId: string | null) => void;
+  getDocumentCategoryDeleteImpact: (categoryId: string) => {
+    category: DocumentCategoryItem | undefined;
+    linkedDocsCount: number;
+  };
+  saveTaskType: (input: {
+    id?: string;
+    name: string;
+    isAdminKind?: boolean;
+    isRenewalKind?: boolean;
+  }) => TaskTypeItem | null;
+  deleteTaskType: (typeId: string, replacementTypeId: string) => boolean;
+  getTaskTypeDeleteImpact: (typeId: string) => {
+    taskType: TaskTypeItem | undefined;
+    linkedTasksCount: number;
+    linkedRenewalTasksCount: number;
+  };
   saveTask: (task: Omit<TaskItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }) => TaskItem;
   deleteTask: (id: string) => void;
   saveDocument: (doc: Omit<DocumentItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId' | 'renewals'> & { id?: string; renewals?: DocumentRenewal[] }) => DocumentItem;
@@ -153,6 +177,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     patchPrefs({ currentSpecialistId });
   const setDocumentWarningDays = (documentWarningDays: number) =>
     patchPrefs({ documentWarningDays });
+  const setUrgentAlertDays = (urgentAlertDays: UrgentAlertDays) =>
+    patchPrefs({ urgentAlertDays });
+  const setUrgentAlertMotion = (urgentAlertMotion: UrgentAlertMotionMode) =>
+    patchPrefs({ urgentAlertMotion });
   const setVat3ARules = (vat3aRules: Vat3ARulesConfig) => patchPrefs({ vat3aRules });
 
   const updateIntegrations = (partial: Partial<IntegrationSettings>) => {
@@ -303,6 +331,100 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const nowIso = () => new Date().toISOString().slice(0, 19);
+
+  const saveDocumentCategory = (input: {
+    id?: string;
+    name: string;
+  }): DocumentCategoryItem | null => {
+    const clean = input.name.trim();
+    if (!clean) return null;
+    const duplicate = db.documentCategories.find(
+      (c) => c.name.trim() === clean && c.id !== input.id
+    );
+    if (duplicate) {
+      showToast('يوجد تصنيف آخر بالاسم نفسه.');
+      return null;
+    }
+    const existing = input.id
+      ? db.documentCategories.find((c) => c.id === input.id)
+      : undefined;
+    const item: DocumentCategoryItem = {
+      id: existing?.id ?? generateId('cat'),
+      orgId: existing?.orgId ?? 'org-01',
+      name: clean,
+      createdAt: existing?.createdAt ?? nowIso(),
+      updatedAt: nowIso(),
+    };
+    setDb(dataRepository.upsertDocumentCategory(item));
+    showToast(existing ? 'تم تحديث اسم التصنيف في جميع الوثائق.' : 'تمت إضافة التصنيف بنجاح.');
+    return item;
+  };
+
+  const deleteDocumentCategory = (
+    categoryId: string,
+    replacementCategoryId: string | null
+  ) => {
+    setDb(dataRepository.deleteDocumentCategory(categoryId, replacementCategoryId));
+    showToast(
+      replacementCategoryId
+        ? 'تم حذف التصنيف ونقل الوثائق المرتبطة إلى التصنيف البديل.'
+        : 'تم حذف التصنيف وتحويل الوثائق المرتبطة إلى «غير مصنفة».'
+    );
+  };
+
+  const getDocumentCategoryDeleteImpact = (categoryId: string) => ({
+    category: db.documentCategories.find((c) => c.id === categoryId),
+    linkedDocsCount: db.documents.filter((d) => d.categoryId === categoryId).length,
+  });
+
+  const saveTaskType = (input: {
+    id?: string;
+    name: string;
+    isAdminKind?: boolean;
+    isRenewalKind?: boolean;
+  }): TaskTypeItem | null => {
+    const clean = input.name.trim();
+    if (!clean) return null;
+    const duplicate = db.taskTypes.find(
+      (t) => t.name.trim() === clean && t.id !== input.id
+    );
+    if (duplicate) {
+      showToast('يوجد نوع مهام آخر بالاسم نفسه.');
+      return null;
+    }
+    const existing = input.id
+      ? db.taskTypes.find((t) => t.id === input.id)
+      : undefined;
+    const item: TaskTypeItem = {
+      id: existing?.id ?? generateId('ttype'),
+      orgId: existing?.orgId ?? 'org-01',
+      name: clean,
+      isAdminKind: input.isAdminKind ?? existing?.isAdminKind ?? false,
+      isRenewalKind: input.isRenewalKind ?? existing?.isRenewalKind ?? false,
+      createdAt: existing?.createdAt ?? nowIso(),
+      updatedAt: nowIso(),
+    };
+    setDb(dataRepository.upsertTaskType(item));
+    showToast(existing ? 'تم تحديث اسم نوع المهمة.' : 'تمت إضافة نوع المهمة.');
+    return item;
+  };
+
+  const deleteTaskType = (typeId: string, replacementTypeId: string): boolean => {
+    const res = dataRepository.deleteTaskType(typeId, replacementTypeId);
+    setDb(res.state);
+    if (!res.ok) {
+      showToast(res.error || 'تعذر حذف نوع المهمة.');
+      return false;
+    }
+    showToast('تم حذف نوع المهمة ونقل المهام المرتبطة إلى النوع البديل.');
+    return true;
+  };
+
+  const getTaskTypeDeleteImpact = (typeId: string) => ({
+    taskType: db.taskTypes.find((t) => t.id === typeId),
+    linkedTasksCount: db.tasks.filter((t) => t.typeId === typeId).length,
+    linkedRenewalTasksCount: db.tasks.filter((t) => t.typeId === typeId && !!t.documentId).length,
+  });
 
   const saveTask = (
     input: Omit<TaskItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }
@@ -657,6 +779,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setShowHijri,
         setCurrentSpecialistId,
         setDocumentWarningDays,
+        setUrgentAlertDays,
+        setUrgentAlertMotion,
         setVat3ARules,
         updateIntegrations,
         testServerConnection,
@@ -667,6 +791,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateTaskFilters,
         updateDocumentFilters,
         updateVatArchiveFilters,
+        saveDocumentCategory,
+        deleteDocumentCategory,
+        getDocumentCategoryDeleteImpact,
+        saveTaskType,
+        deleteTaskType,
+        getTaskTypeDeleteImpact,
         saveTask,
         deleteTask,
         saveDocument,

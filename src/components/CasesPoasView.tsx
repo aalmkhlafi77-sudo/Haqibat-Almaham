@@ -12,9 +12,11 @@ import {
 import { useApp } from '../context/AppContext';
 import {
   evaluatePoaHealth,
+  evaluateUrgentAlert,
   formatDateTime,
   formatDisplayDate,
   getTodayISO,
+  getUrgentAlertMotionClass,
 } from '../domain/dateUtils';
 import { scoreArabicSearchMatch } from '../domain/searchUtils';
 import { CollapsibleSection } from './CollapsibleSection';
@@ -236,10 +238,21 @@ export const CasesPoasView: React.FC = () => {
           ) : (
             filteredSessions.map((s) => {
               const parentCase = db.cases.find((c) => c.id === s.caseId);
+              const isTerminal = s.status === 'منعقدة' || s.status === 'ملغاة';
+              const urgent = evaluateUrgentAlert(
+                s.scheduledAt,
+                isTerminal,
+                db.preferences.urgentAlertDays,
+                today
+              );
+              const motionClass = getUrgentAlertMotionClass(
+                urgent.isUrgentAlert,
+                db.preferences.urgentAlertMotion
+              );
               return (
                 <div
                   key={s.id}
-                  className="py-3 first:pt-0 last:pb-0 flex flex-wrap items-center justify-between gap-2"
+                  className={`py-3 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 border border-transparent rounded-xl ${motionClass}`}
                 >
                   <div className="min-w-0 flex-1">
                     <button
@@ -268,6 +281,13 @@ export const CasesPoasView: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
+                    {urgent.isUrgentAlert && urgent.badgeText && (
+                      <StatusBadge
+                        label={urgent.badgeText}
+                        tone={urgent.kind === 'today' ? 'today' : 'warning'}
+                        icon="clock"
+                      />
+                    )}
                     <StatusBadge
                       label={s.status}
                       tone={s.status === 'منعقدة' ? 'success' : 'purple'}
@@ -314,10 +334,21 @@ export const CasesPoasView: React.FC = () => {
           ) : (
             filteredPoas.map((p) => {
               const ph = evaluatePoaHealth(p, warningDays, today);
+              const isTerminal = !!p.archivedAt || p.statusOverride === 'مفسوخة';
+              const urgent = evaluateUrgentAlert(
+                p.expiryDate,
+                isTerminal,
+                db.preferences.urgentAlertDays,
+                today
+              );
+              const motionClass = getUrgentAlertMotionClass(
+                urgent.isUrgentAlert,
+                db.preferences.urgentAlertMotion
+              );
               return (
                 <div
                   key={p.id}
-                  className="py-3 first:pt-0 last:pb-0 flex flex-wrap items-center justify-between gap-2"
+                  className={`py-3 px-2 first:pt-2 last:pb-2 flex flex-wrap items-center justify-between gap-2 border border-transparent rounded-xl ${motionClass}`}
                 >
                   <div className="min-w-0 flex-1">
                     <button
