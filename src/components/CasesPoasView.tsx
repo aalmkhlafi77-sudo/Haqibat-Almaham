@@ -25,7 +25,8 @@ import { StatusBadge } from './StatusBadge';
 const CASES_SECTION_KEYS = ['cases_list', 'sessions_list', 'poas_list'];
 
 export const CasesPoasView: React.FC = () => {
-  const { db, openRecord, openShareModal, setSectionsCollapsed } = useApp();
+  const { db, hasPerm, openRecord, openShareModal, setSectionsCollapsed } = useApp();
+  const canWriteRecords = hasPerm('records:write');
   const [searchQuery, setSearchQuery] = useState('');
   const today = getTodayISO();
   const showHijri = db.preferences.showHijri;
@@ -132,32 +133,36 @@ export const CasesPoasView: React.FC = () => {
             )}
           </button>
 
-          <button
-            type="button"
-            onClick={() => openRecord('case', null)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-600 text-white hover:bg-amber-700 text-xs font-semibold"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>قضية</span>
-          </button>
+          {canWriteRecords && (
+            <>
+              <button
+                type="button"
+                onClick={() => openRecord('case', null)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-600 text-white hover:bg-amber-700 text-xs font-semibold"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>قضية</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => openRecord('session', null)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-violet-600 text-white hover:bg-violet-700 text-xs font-semibold"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>جلسة</span>
-          </button>
+              <button
+                type="button"
+                onClick={() => openRecord('session', null)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-violet-600 text-white hover:bg-violet-700 text-xs font-semibold"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>جلسة</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => openRecord('poa', null)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 text-xs font-semibold"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>وكالة / تفويض</span>
-          </button>
+              <button
+                type="button"
+                onClick={() => openRecord('poa', null)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 text-xs font-semibold"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>وكالة / تفويض</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 

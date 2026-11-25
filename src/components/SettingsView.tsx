@@ -1,24 +1,38 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
+  AlertTriangle,
   BellRing,
   Bot,
   Calculator,
   Check,
+  DatabaseBackup,
+  Download,
   Edit3,
   FolderKanban,
+  Lock,
   Moon,
   Plus,
   RotateCcw,
   Server,
   Settings,
+  Shield,
   Sun,
   Tag,
   Trash2,
+  Upload,
+  UserPlus,
   Wifi,
   WifiOff,
   X,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { ROLE_LABELS } from '../domain/authPermissions';
+import {
+  BACKUP_SCHEMA_VERSION,
+  computeBackupSummaryCounts,
+  validateBackupFileText,
+  type BackupValidationResult,
+} from '../domain/backupUtils';
 import { toEnglishDigits } from '../domain/dateUtils';
 import {
   buildDefaultVat3ARulesConfig,
@@ -27,9 +41,11 @@ import {
   VAT_3A_LINE_DEFINITIONS,
 } from '../domain/vat3aEngine';
 import {
+  AuthUser,
   IntegrationSettings,
   UrgentAlertDays,
   UrgentAlertMotionMode,
+  UserRole,
   Vat3AAdjustmentDirection,
   Vat3ALineId,
   Vat3ATaxMethod,
@@ -39,6 +55,10 @@ import { StatusBadge } from './StatusBadge';
 export const SettingsView: React.FC = () => {
   const {
     db,
+    currentUser,
+    authMode,
+    lastBackupMeta,
+    hasPerm,
     setTheme,
     setShowHijri,
     setCurrentSpecialistId,
@@ -55,6 +75,8 @@ export const SettingsView: React.FC = () => {
     updateIntegrations,
     testServerConnection,
     testAiConnection,
+    exportBackup,
+    restoreBackup,
     resetDemoData,
     showToast,
   } = useApp();
@@ -62,6 +84,21 @@ export const SettingsView: React.FC = () => {
   const [confirmReset, setConfirmReset] = useState(false);
   const [testingServer, setTestingServer] = useState(false);
   const [testingAi, setTestingAi] = useState(false);
+
+  // Backup & Restore state
+  const backupInputRef = useRef<HTMLInputElement | null>(null);
+  const [backupValidation, setBackupValidation] = useState<BackupValidationResult | null>(null);
+  const [backupFileName, setBackupFileName] = useState('');
+  const [restoringBackup, setRestoringBackup] = useState(false);
+  const [exportingBackup, setExportingBackup] = useState(false);
+
+  // Server User Management state (available when connected as Server Admin)
+  const [serverUsersList, setServerUsersList] = useState<AuthUser[]>([]);
+  const [newStaffUsername, setNewStaffUsername] = useState('');
+  const [newStaffName, setNewStaffName] = useState('');
+  const [newStaffRole, setNewStaffRole] = useState<UserRole>('operations');
+  const [newStaffPassword, setNewStaffPassword] = useState('');
+  const [staffMessage, setStaffMessage] = useState('');
 
   // Document Categories management state
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -118,6 +155,94 @@ export const SettingsView: React.FC = () => {
       integrations.aiModelName
     );
     setTestingAi(false);
+  };
+
+  const canManageSettings = hasPerm('settings:manage');
+  const canDeleteRecords = hasPerm('records:delete');
+  const canExportBackup = hasPerm('backups:export');
+  const canRestoreBackup = hasPerm('backups:restore');
+  const canEditVatRules = hasPerm('vat3a:edit');
+  const currentCounts = computeBackupSummaryCounts(db);
+
+  const handleBackupFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setBackupFileName(file.name);
+    try {
+      const text = await file.text();
+      const result = validateBackupFileText(text);
+      setBackupValidation(result);
+    } catch {
+      setBackupValidation({
+        ok: false,
+        error: 'تعذرت قراءة ملف النسخة الاحتياطية؛ لم تتغير البيانات الحالية.',
+      });
+    }
+  };
+
+  const handleConfirmRestore = async () => {
+    if (!backupValidation?.ok || !backupValidation.envelope) return;
+    setRestoringBackup(true);
+    try {
+      const res = await restoreBackup(backupValidation.envelope);
+      if (!res.ok) {
+        setBackupValidation({
+          ok: false,
+          error: res.error || 'تعذرت الاستعادة — تم الإبقاء على البيانات الحالية سليمة.',
+        });
+      } else {
+        setBackupValidation(null);
+        setBackupFileName('');
+      }
+    } finally {
+      setRestoringBackup(false);
+    }
+  };
+
+  const handleLoadServerUsers = async () => {
+    try {
+      const res = await fetch('/api/auth/users', { credentials: 'include' });
+      if (res.ok) {
+        const data = (await res.json()) as { users?: AuthUser[] };
+        setServerUsersList(data.users || []);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleCreateServerUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStaffMessage('');
+    try {
+      const res = await fetch('/api/auth/users', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: JSON.stringify({
+          username: newStaffUsername,
+          displayName: newStaffName || newStaffUsername,
+          role: newStaffRole,
+          password: newStaffPassword,
+        }),
+      });
+      const data = (await res.json()) as { user?: AuthUser; error?: string };
+      if (!res.ok) {
+        setStaffMessage(data.error || 'تعذر إنشاء الحساب على الخادم.');
+        return;
+      }
+      setNewStaffUsername('');
+      setNewStaffName('');
+      setNewStaffPassword('');
+      setStaffMessage(`تم إنشاء حساب «${data.user?.displayName}» (${data.user?.roleLabel}) بنجاح.`);
+      await handleLoadServerUsers();
+    } catch {
+      setStaffMessage('تعذر الاتصال بالخادم لإنشاء الحساب.');
+    }
   };
 
   const renderConnBadge = (status: IntegrationSettings['serverStatus']) => {
@@ -293,30 +418,37 @@ export const SettingsView: React.FC = () => {
           </p>
         </div>
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!newCategoryName.trim()) return;
-            const created = saveDocumentCategory({ name: newCategoryName });
-            if (created) setNewCategoryName('');
-          }}
-          className="flex flex-wrap items-center gap-2"
-        >
-          <input
-            type="text"
-            value={newCategoryName}
-            onChange={(e) => setNewCategoryName(e.target.value)}
-            placeholder="اسم تصنيف جديد (مثال: تصاريح بيئية)..."
-            className="flex-1 min-w-[200px] rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-xs text-slate-900 dark:text-slate-100"
-          />
-          <button
-            type="submit"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-xs font-semibold"
+        {canManageSettings ? (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!newCategoryName.trim()) return;
+              const created = saveDocumentCategory({ name: newCategoryName });
+              if (created) setNewCategoryName('');
+            }}
+            className="flex flex-wrap items-center gap-2"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>إضافة تصنيف</span>
-          </button>
-        </form>
+            <input
+              type="text"
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              placeholder="اسم تصنيف جديد (مثال: تصاريح بيئية)..."
+              className="flex-1 min-w-[200px] rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-xs text-slate-900 dark:text-slate-100"
+            />
+            <button
+              type="submit"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-xs font-semibold"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>إضافة تصنيف</span>
+            </button>
+          </form>
+        ) : (
+          <p className="text-[11px] text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
+            <Lock className="w-3.5 h-3.5" />
+            <span>عرض فقط — تعديل أو حذف تصنيفات الوثائق يتطلب صلاحية إدارة الإعدادات.</span>
+          </p>
+        )}
 
         <div className="divide-y divide-slate-100 dark:divide-white/10 rounded-xl border border-slate-200 dark:border-white/10 overflow-hidden">
           {db.documentCategories.map((cat) => {
@@ -367,7 +499,7 @@ export const SettingsView: React.FC = () => {
                   </div>
                 )}
 
-                {!isEditing && (
+                {!isEditing && canManageSettings && (
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
@@ -380,19 +512,21 @@ export const SettingsView: React.FC = () => {
                       <Edit3 className="w-3 h-3" />
                       <span>تعديل</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const others = db.documentCategories.filter((c) => c.id !== cat.id);
-                        setDeletingCatId(cat.id);
-                        setCatDeleteMode(others.length > 0 ? 'transfer' : 'clear');
-                        setCatReplacementId(others[0]?.id || '');
-                      }}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-rose-200 dark:border-rose-800/70 text-[11px] font-medium text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      <span>حذف</span>
-                    </button>
+                    {canDeleteRecords && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const others = db.documentCategories.filter((c) => c.id !== cat.id);
+                          setDeletingCatId(cat.id);
+                          setCatDeleteMode(others.length > 0 ? 'transfer' : 'clear');
+                          setCatReplacementId(others[0]?.id || '');
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-rose-200 dark:border-rose-800/70 text-[11px] font-medium text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>حذف</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -413,46 +547,53 @@ export const SettingsView: React.FC = () => {
           </p>
         </div>
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!newTaskTypeName.trim()) return;
-            const created = saveTaskType({
-              name: newTaskTypeName,
-              isAdminKind: newTaskTypeAdminKind,
-            });
-            if (created) {
-              setNewTaskTypeName('');
-              setNewTaskTypeAdminKind(false);
-            }
-          }}
-          className="space-y-2"
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              type="text"
-              value={newTaskTypeName}
-              onChange={(e) => setNewTaskTypeName(e.target.value)}
-              placeholder="اسم نوع مهمة جديد (مثال: متابعة ميدانية)..."
-              className="flex-1 min-w-[200px] rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-xs text-slate-900 dark:text-slate-100"
-            />
-            <button
-              type="submit"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-xs font-semibold"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>إضافة نوع</span>
-            </button>
-          </div>
-          <label className="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={newTaskTypeAdminKind}
-              onChange={(e) => setNewTaskTypeAdminKind(e.target.checked)}
-            />
-            <span>يتضمن حقول الخطاب والجهة وتاريخ الاستلام (مثل المهام الإدارية)</span>
-          </label>
-        </form>
+        {canManageSettings ? (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!newTaskTypeName.trim()) return;
+              const created = saveTaskType({
+                name: newTaskTypeName,
+                isAdminKind: newTaskTypeAdminKind,
+              });
+              if (created) {
+                setNewTaskTypeName('');
+                setNewTaskTypeAdminKind(false);
+              }
+            }}
+            className="space-y-2"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                value={newTaskTypeName}
+                onChange={(e) => setNewTaskTypeName(e.target.value)}
+                placeholder="اسم نوع مهمة جديد (مثال: متابعة ميدانية)..."
+                className="flex-1 min-w-[200px] rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-xs text-slate-900 dark:text-slate-100"
+              />
+              <button
+                type="submit"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-xs font-semibold"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>إضافة نوع</span>
+              </button>
+            </div>
+            <label className="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={newTaskTypeAdminKind}
+                onChange={(e) => setNewTaskTypeAdminKind(e.target.checked)}
+              />
+              <span>يتضمن حقول الخطاب والجهة وتاريخ الاستلام (مثل المهام الإدارية)</span>
+            </label>
+          </form>
+        ) : (
+          <p className="text-[11px] text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
+            <Lock className="w-3.5 h-3.5" />
+            <span>عرض فقط — تعديل أو حذف أنواع المهام يتطلب صلاحية إدارة الإعدادات.</span>
+          </p>
+        )}
 
         <div className="divide-y divide-slate-100 dark:divide-white/10 rounded-xl border border-slate-200 dark:border-white/10 overflow-hidden">
           {db.taskTypes.map((tt) => {
@@ -513,7 +654,7 @@ export const SettingsView: React.FC = () => {
                   </div>
                 )}
 
-                {!isEditing && (
+                {!isEditing && canManageSettings && (
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
@@ -526,19 +667,21 @@ export const SettingsView: React.FC = () => {
                       <Edit3 className="w-3 h-3" />
                       <span>تعديل</span>
                     </button>
-                    <button
-                      type="button"
-                      disabled={db.taskTypes.length <= 1}
-                      onClick={() => {
-                        const others = db.taskTypes.filter((x) => x.id !== tt.id);
-                        setDeletingTypeId(tt.id);
-                        setTypeReplacementId(others[0]?.id || '');
-                      }}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-rose-200 dark:border-rose-800/70 text-[11px] font-medium text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-40"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      <span>حذف</span>
-                    </button>
+                    {canDeleteRecords && (
+                      <button
+                        type="button"
+                        disabled={db.taskTypes.length <= 1}
+                        onClick={() => {
+                          const others = db.taskTypes.filter((x) => x.id !== tt.id);
+                          setDeletingTypeId(tt.id);
+                          setTypeReplacementId(others[0]?.id || '');
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-rose-200 dark:border-rose-800/70 text-[11px] font-medium text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-40"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>حذف</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -559,18 +702,29 @@ export const SettingsView: React.FC = () => {
               تُطبّق هذه القواعد على المسودات الجديدة، بينما تحتفظ المسودات المحفوظة مسبقًا بنتائجها إلا عند اختيار إعادة الاحتساب داخل النموذج.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setVat3ARules(buildDefaultVat3ARulesConfig());
-              showToast('تمت استعادة قواعد 3A الافتراضية (البند 1 بالطرح · 15%).');
-            }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>استعادة الافتراضي</span>
-          </button>
+          {canEditVatRules && (
+            <button
+              type="button"
+              onClick={() => {
+                setVat3ARules(buildDefaultVat3ARulesConfig());
+                showToast('تمت استعادة قواعد 3A الافتراضية (البند 1 بالطرح · 15%).');
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>استعادة الافتراضي</span>
+            </button>
+          )}
         </div>
+
+        {!canEditVatRules && (
+          <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/35 p-3 text-xs text-amber-900 dark:text-amber-200 flex items-center gap-2">
+            <Lock className="w-4 h-4 shrink-0" />
+            <span>
+              قواعد حساب 3A محمية بصلاحية المحاسب الضريبي أو مدير النظام؛ الحساب الحالي ({currentUser?.roleLabel}) يملك صلاحية العرض فقط.
+            </span>
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl glass-surface-subtle">
           <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
@@ -582,6 +736,7 @@ export const SettingsView: React.FC = () => {
             max={100}
             step={0.5}
             dir="ltr"
+            disabled={!canEditVatRules}
             value={rules.defaultRatePercent}
             onChange={(e) => {
               const val = Math.max(0, Math.min(100, Number(e.target.value)));
@@ -590,7 +745,7 @@ export const SettingsView: React.FC = () => {
                 defaultRatePercent: Number.isNaN(val) ? 15 : val,
               });
             }}
-            className="w-24 rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2.5 py-1.5 text-sm font-mono-tabular text-center"
+            className="w-24 rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2.5 py-1.5 text-sm font-mono-tabular text-center disabled:opacity-50"
           />
           <span className="text-xs text-slate-500 dark:text-slate-400">
             تبدأ النسبة العامة من 15% وتُستخدم للبنود التي لم تُحدَّد لها نسبة خاصة أو أثر صفري.
@@ -651,13 +806,14 @@ export const SettingsView: React.FC = () => {
                       ) : (
                         <select
                           aria-label={`اتجاه التعديل للبند ${lineId}`}
+                          disabled={!canEditVatRules}
                           value={rule.adjustmentDirection}
                           onChange={(e) =>
                             updateLineRule(lineId, {
                               adjustmentDirection: e.target.value as Vat3AAdjustmentDirection,
                             })
                           }
-                          className="w-full min-w-[140px] rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2 py-1.5 text-xs"
+                          className="w-full min-w-[140px] rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2 py-1.5 text-xs disabled:opacity-50"
                         >
                           <option value="subtract">طرح (يُطرح من المبلغ)</option>
                           <option value="add">جمع (يُضاف إلى المبلغ)</option>
@@ -667,13 +823,14 @@ export const SettingsView: React.FC = () => {
                     <td className="py-2 px-3">
                       <select
                         aria-label={`طريقة الضريبة للبند ${lineId}`}
+                        disabled={!canEditVatRules}
                         value={rule.taxMethod}
                         onChange={(e) =>
                           updateLineRule(lineId, {
                             taxMethod: e.target.value as Vat3ATaxMethod,
                           })
                         }
-                        className="w-full min-w-[170px] rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2 py-1.5 text-xs"
+                        className="w-full min-w-[170px] rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2 py-1.5 text-xs disabled:opacity-50"
                       >
                         <option value="rate">
                           {isReverseCharge
@@ -687,7 +844,7 @@ export const SettingsView: React.FC = () => {
                       <div className="flex flex-wrap items-center gap-1.5">
                         <select
                           aria-label={`نوع النسبة للبند ${lineId}`}
-                          disabled={rule.taxMethod === 'zero'}
+                          disabled={!canEditVatRules || rule.taxMethod === 'zero'}
                           value={usesCustomRate ? 'custom' : 'global'}
                           onChange={(e) => {
                             const mode = e.target.value;
@@ -713,7 +870,7 @@ export const SettingsView: React.FC = () => {
                             max={100}
                             step={0.5}
                             dir="ltr"
-                            disabled={rule.taxMethod === 'zero'}
+                            disabled={!canEditVatRules || rule.taxMethod === 'zero'}
                             value={rule.customRatePercent ?? ''}
                             onChange={(e) => {
                               const v = e.target.value;
@@ -789,6 +946,7 @@ export const SettingsView: React.FC = () => {
               <input
                 type="url"
                 dir="ltr"
+                disabled={!canManageSettings}
                 value={integrations.serverBaseUrl}
                 onChange={(e) =>
                   updateIntegrations({
@@ -797,7 +955,7 @@ export const SettingsView: React.FC = () => {
                   })
                 }
                 placeholder="https://api.yourdomain.com"
-                className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-3 py-2 text-xs font-mono-tabular"
+                className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-3 py-2 text-xs font-mono-tabular disabled:opacity-50"
               />
             </div>
 
@@ -809,7 +967,7 @@ export const SettingsView: React.FC = () => {
 
             <button
               type="button"
-              disabled={testingServer}
+              disabled={!canManageSettings || testingServer}
               onClick={handleTestServer}
               className="px-3.5 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-xs font-semibold disabled:opacity-60"
             >
@@ -833,6 +991,7 @@ export const SettingsView: React.FC = () => {
                   المزود
                 </label>
                 <select
+                  disabled={!canManageSettings}
                   value={integrations.aiProvider}
                   onChange={(e) =>
                     updateIntegrations({
@@ -840,7 +999,7 @@ export const SettingsView: React.FC = () => {
                       aiStatus: 'disconnected',
                     })
                   }
-                  className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2.5 py-2 text-xs"
+                  className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2.5 py-2 text-xs disabled:opacity-50"
                 >
                   <option value="gemini">Google Gemini</option>
                   <option value="openai">OpenAI Compatible</option>
@@ -854,6 +1013,7 @@ export const SettingsView: React.FC = () => {
                 <input
                   type="text"
                   dir="ltr"
+                  disabled={!canManageSettings}
                   value={integrations.aiModelName}
                   onChange={(e) =>
                     updateIntegrations({
@@ -861,7 +1021,7 @@ export const SettingsView: React.FC = () => {
                       aiStatus: 'disconnected',
                     })
                   }
-                  className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2.5 py-2 text-xs font-mono-tabular"
+                  className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2.5 py-2 text-xs font-mono-tabular disabled:opacity-50"
                 />
               </div>
             </div>
@@ -874,7 +1034,7 @@ export const SettingsView: React.FC = () => {
 
             <button
               type="button"
-              disabled={testingAi}
+              disabled={!canManageSettings || testingAi}
               onClick={handleTestAi}
               className="px-3.5 py-2 rounded-lg border border-violet-300 dark:border-violet-500/40 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/40 text-xs font-semibold disabled:opacity-60"
             >
@@ -884,6 +1044,366 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
+      {/* Backup & Restore Section */}
+      <div className="glass-panel rounded-xl p-5 space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <DatabaseBackup className="w-4 h-4 text-emerald-500" />
+              <span>النسخ الاحتياطية والاستعادة</span>
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+              تصدير نسخة احتياطية كاملة واستعادتها بأمان. تُستبعد كلمات المرور ومفاتيح الاتصال السرية دائمًا من النسخة القابلة للتنزيل.
+            </p>
+          </div>
+          <div className="text-left text-[11px] font-mono-tabular text-slate-500 dark:text-slate-400">
+            <div>إصدار البنية: {BACKUP_SCHEMA_VERSION}</div>
+            <div>
+              آخر نسخة:{' '}
+              {lastBackupMeta
+                ? toEnglishDigits(lastBackupMeta.createdAt.replace('T', ' '))
+                : 'لم تُنشأ بعد'}
+            </div>
+          </div>
+        </div>
+
+        {/* Scope & Metadata Summary */}
+        <div className="glass-surface-subtle rounded-xl p-3.5 space-y-2 text-xs">
+          <div className="font-bold text-slate-800 dark:text-slate-200">
+            محتويات النسخة الحالية ({authMode === 'server' ? 'الخادم المشترك' : 'بيانات المتصفح المحلية'}):
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+            <div>
+              المهام:{' '}
+              <span className="font-bold font-mono-tabular">
+                {toEnglishDigits(String(currentCounts.tasks))}
+              </span>
+            </div>
+            <div>
+              الوثائق والتجديدات:{' '}
+              <span className="font-bold font-mono-tabular">
+                {toEnglishDigits(String(currentCounts.documents))} /{' '}
+                {toEnglishDigits(String(currentCounts.documentRenewals))}
+              </span>
+            </div>
+            <div>
+              القضايا والجلسات:{' '}
+              <span className="font-bold font-mono-tabular">
+                {toEnglishDigits(String(currentCounts.cases))} /{' '}
+                {toEnglishDigits(String(currentCounts.sessions))}
+              </span>
+            </div>
+            <div>
+              الوكالات والتقويم:{' '}
+              <span className="font-bold font-mono-tabular">
+                {toEnglishDigits(String(currentCounts.poas))} /{' '}
+                {toEnglishDigits(String(currentCounts.calendarItems))}
+              </span>
+            </div>
+            <div>
+              التصنيفات والأنواع:{' '}
+              <span className="font-bold font-mono-tabular">
+                {toEnglishDigits(String(currentCounts.documentCategories))} /{' '}
+                {toEnglishDigits(String(currentCounts.taskTypes))}
+              </span>
+            </div>
+            <div>
+              الملصقات وسجل المشاركة:{' '}
+              <span className="font-bold font-mono-tabular">
+                {toEnglishDigits(String(currentCounts.labels))} /{' '}
+                {toEnglishDigits(String(currentCounts.shareLogs))}
+              </span>
+            </div>
+            <div>
+              مسودات وأرشيف 3A:{' '}
+              <span className="font-bold font-mono-tabular">
+                {toEnglishDigits(String(currentCounts.vat3aDrafts))} (مؤرشف:{' '}
+                {toEnglishDigits(String(currentCounts.vat3aArchivedDrafts))})
+              </span>
+            </div>
+            <div>
+              قواعد 3A المحفوظة:{' '}
+              <span className="font-bold font-mono-tabular">
+                {toEnglishDigits(String(db.preferences.vat3aRules.defaultRatePercent))}%
+              </span>
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200/70 dark:border-white/10">
+            في المعاينة المحلية تُحفظ كل السجلات وروابطها وقواعد 3A؛ وفي النسخة المرتبطة بالخادم المشترك تُضمّن المرفقات الثنائية ضمن خطة النسخ والاستعادة الإدارية، ويُلزم اختبار الاستعادة على بيانات تجريبية قبل أي استخدام تشغيلي.
+          </p>
+        </div>
+
+        {!canExportBackup && !canRestoreBackup ? (
+          <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/35 p-3.5 text-xs text-amber-900 dark:text-amber-200 flex items-center gap-2">
+            <Lock className="w-4 h-4 shrink-0" />
+            <span>
+              النسخ الاحتياطي والاستعادة محصوران بصلاحية إدارية؛ الحساب الحالي ({currentUser?.roleLabel}) لا يملك صلاحية تنفيذ هذه الإجراءات.
+            </span>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                disabled={!canExportBackup || exportingBackup}
+                onClick={async () => {
+                  setExportingBackup(true);
+                  const res = await exportBackup();
+                  setExportingBackup(false);
+                  if (!res.ok && res.error) showToast(res.error);
+                }}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 text-xs font-semibold"
+              >
+                <Download className="w-4 h-4" />
+                <span>
+                  {exportingBackup ? 'جارٍ تجهيز النسخة...' : 'تنزيل نسخة احتياطية (JSON)'}
+                </span>
+              </button>
+
+              <input
+                ref={backupInputRef}
+                type="file"
+                accept=".json,application/json"
+                onChange={handleBackupFileSelected}
+                className="hidden"
+                aria-label="اختيار ملف نسخة احتياطية للاستعادة"
+              />
+              <button
+                type="button"
+                disabled={!canRestoreBackup}
+                onClick={() => backupInputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-50 text-xs font-semibold"
+              >
+                <Upload className="w-4 h-4 text-blue-500" />
+                <span>اختيار ملف للاستعادة</span>
+              </button>
+            </div>
+
+            {/* Validation Error or Pre-Confirmation Summary */}
+            {backupValidation && !backupValidation.ok && (
+              <div
+                role="alert"
+                className="rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/45 p-3.5 text-xs text-rose-800 dark:text-rose-200 flex items-start justify-between gap-3"
+              >
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold">تم رفض ملف الاستعادة ({backupFileName})</div>
+                    <p className="mt-0.5 leading-relaxed">{backupValidation.error}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setBackupValidation(null)}
+                  className="p-1 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/50"
+                  aria-label="إغلاق التنبيه"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {backupValidation?.ok && backupValidation.envelope && backupValidation.counts && (
+              <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-950/35 p-4 space-y-3 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-bold text-blue-900 dark:text-blue-200">
+                    تم التحقق من سلامة الملف ({backupFileName}) — ملخص ما سيُستبدل قبل التأكيد
+                  </div>
+                  <span className="font-mono-tabular text-[11px] text-blue-700 dark:text-blue-300">
+                    أُنشئت: {toEnglishDigits(backupValidation.envelope.createdAt.replace('T', ' '))} ·{' '}
+                    {backupValidation.envelope.schemaVersion}
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto rounded-lg border border-blue-200/80 dark:border-blue-800/70 bg-white/80 dark:bg-[#0e1015]">
+                  <table className="w-full text-[11px] border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400">
+                        <th className="text-right py-2 px-3">العنصر</th>
+                        <th className="text-right py-2 px-3">الحالة الحالية (ستُستبدل)</th>
+                        <th className="text-right py-2 px-3">النسخة المختارة</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-white/10 font-mono-tabular">
+                      <tr>
+                        <td className="py-1.5 px-3 font-sans font-semibold">المهام</td>
+                        <td className="py-1.5 px-3">{toEnglishDigits(String(currentCounts.tasks))}</td>
+                        <td className="py-1.5 px-3 font-bold text-blue-700 dark:text-blue-300">
+                          {toEnglishDigits(String(backupValidation.counts.tasks))}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-1.5 px-3 font-sans font-semibold">الوثائق وسجلات التجديد</td>
+                        <td className="py-1.5 px-3">
+                          {toEnglishDigits(String(currentCounts.documents))} ({toEnglishDigits(String(currentCounts.documentRenewals))} تجديد)
+                        </td>
+                        <td className="py-1.5 px-3 font-bold text-blue-700 dark:text-blue-300">
+                          {toEnglishDigits(String(backupValidation.counts.documents))} ({toEnglishDigits(String(backupValidation.counts.documentRenewals))} تجديد)
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-1.5 px-3 font-sans font-semibold">القضايا والجلسات والوكالات</td>
+                        <td className="py-1.5 px-3">
+                          {toEnglishDigits(String(currentCounts.cases))} / {toEnglishDigits(String(currentCounts.sessions))} / {toEnglishDigits(String(currentCounts.poas))}
+                        </td>
+                        <td className="py-1.5 px-3 font-bold text-blue-700 dark:text-blue-300">
+                          {toEnglishDigits(String(backupValidation.counts.cases))} / {toEnglishDigits(String(backupValidation.counts.sessions))} / {toEnglishDigits(String(backupValidation.counts.poas))}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-1.5 px-3 font-sans font-semibold">عناصر التقويم والملصقات</td>
+                        <td className="py-1.5 px-3">
+                          {toEnglishDigits(String(currentCounts.calendarItems))} / {toEnglishDigits(String(currentCounts.labels))}
+                        </td>
+                        <td className="py-1.5 px-3 font-bold text-blue-700 dark:text-blue-300">
+                          {toEnglishDigits(String(backupValidation.counts.calendarItems))} / {toEnglishDigits(String(backupValidation.counts.labels))}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-1.5 px-3 font-sans font-semibold">التصنيفات وأنواع المهام</td>
+                        <td className="py-1.5 px-3">
+                          {toEnglishDigits(String(currentCounts.documentCategories))} / {toEnglishDigits(String(currentCounts.taskTypes))}
+                        </td>
+                        <td className="py-1.5 px-3 font-bold text-blue-700 dark:text-blue-300">
+                          {toEnglishDigits(String(backupValidation.counts.documentCategories))} / {toEnglishDigits(String(backupValidation.counts.taskTypes))}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-1.5 px-3 font-sans font-semibold">مسودات وأرشيف 3A</td>
+                        <td className="py-1.5 px-3">
+                          {toEnglishDigits(String(currentCounts.vat3aDrafts))} (مؤرشف: {toEnglishDigits(String(currentCounts.vat3aArchivedDrafts))})
+                        </td>
+                        <td className="py-1.5 px-3 font-bold text-blue-700 dark:text-blue-300">
+                          {toEnglishDigits(String(backupValidation.counts.vat3aDrafts))} (مؤرشف: {toEnglishDigits(String(backupValidation.counts.vat3aArchivedDrafts))})
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <p className="text-[11px] text-blue-800 dark:text-blue-300">
+                  تؤخذ لقطة أمان من الحالة الحالية تلقائيًا قبل التطبيق؛ وإذا فشل أي جزء من الاستعادة تبقى البيانات الحالية سليمة كما هي.
+                </p>
+
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBackupValidation(null);
+                      setBackupFileName('');
+                    }}
+                    className="px-3.5 py-2 rounded-lg border border-slate-300 dark:border-white/15 text-xs font-medium"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="button"
+                    disabled={restoringBackup}
+                    onClick={handleConfirmRestore}
+                    className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-xs font-bold disabled:opacity-60"
+                  >
+                    {restoringBackup ? 'جارٍ الاستعادة...' : 'تأكيد الاستعادة واستبدال البيانات'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Server Accounts & RBAC Management (visible in Server Mode for Admin) */}
+      {authMode === 'server' && canManageSettings && (
+        <div className="glass-panel rounded-xl p-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Shield className="w-4 h-4 text-blue-500" />
+                <span>إدارة حسابات الخادم والصلاحيات</span>
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                إنشاء حسابات الموظفين على الخادم بصلاحيات محددة (قراءة/تعديل، تقارير، ضريبة 3A، نسخ احتياطي) دون كشف كلمات المرور.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleLoadServerUsers}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/15 text-xs font-semibold"
+            >
+              تحديث القائمة
+            </button>
+          </div>
+
+          <form onSubmit={handleCreateServerUser} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+            <input
+              type="text"
+              required
+              minLength={3}
+              dir="ltr"
+              value={newStaffUsername}
+              onChange={(e) => setNewStaffUsername(e.target.value)}
+              placeholder="اسم المستخدم (مثل sara.tax)"
+              className="rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-xs font-mono-tabular"
+            />
+            <input
+              type="text"
+              value={newStaffName}
+              onChange={(e) => setNewStaffName(e.target.value)}
+              placeholder="الاسم الظاهر"
+              className="rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-xs"
+            />
+            <select
+              value={newStaffRole}
+              onChange={(e) => setNewStaffRole(e.target.value as UserRole)}
+              className="rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-2.5 py-2 text-xs"
+            >
+              <option value="tax_accountant">{ROLE_LABELS.tax_accountant}</option>
+              <option value="operations">{ROLE_LABELS.operations}</option>
+              <option value="viewer">{ROLE_LABELS.viewer}</option>
+              <option value="admin">{ROLE_LABELS.admin}</option>
+            </select>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                required
+                minLength={6}
+                dir="ltr"
+                value={newStaffPassword}
+                onChange={(e) => setNewStaffPassword(e.target.value)}
+                placeholder="كلمة المرور (6+)"
+                className="flex-1 min-w-0 rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-2.5 py-2 text-xs font-mono-tabular"
+              />
+              <button
+                type="submit"
+                className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold shrink-0"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>إضافة</span>
+              </button>
+            </div>
+          </form>
+
+          {staffMessage && (
+            <p className="text-xs text-blue-700 dark:text-blue-300 font-medium">{staffMessage}</p>
+          )}
+
+          {serverUsersList.length > 0 && (
+            <div className="divide-y divide-slate-100 dark:divide-white/10 rounded-xl border border-slate-200 dark:border-white/10 overflow-hidden">
+              {serverUsersList.map((u) => (
+                <div key={u.id} className="px-3.5 py-2 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="font-bold text-slate-900 dark:text-white">{u.displayName}</span>
+                    <span className="text-slate-500 dark:text-slate-400 font-mono-tabular mr-2">
+                      @{u.username}
+                    </span>
+                  </div>
+                  <StatusBadge label={u.roleLabel} tone="info" />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Reset Demo Data */}
       <div className="glass-panel rounded-xl p-5 flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -891,11 +1411,16 @@ export const SettingsView: React.FC = () => {
             إعادة ضبط البيانات التجريبية
           </div>
           <div className="text-xs text-slate-500 dark:text-slate-400">
-            استعادة السجلات الافتراضية لهذه المعاينة المحلية
+            استعادة السجلات الافتراضية لهذه المعاينة المحلية {!canEditVatRules && '(للمدير فقط)'}
           </div>
         </div>
 
-        {!confirmReset ? (
+        {!canManageSettings ? (
+          <span className="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+            <Lock className="w-3.5 h-3.5" />
+            <span>يتطلب صلاحية إدارة الإعدادات</span>
+          </span>
+        ) : !confirmReset ? (
           <button
             type="button"
             onClick={() => setConfirmReset(true)}

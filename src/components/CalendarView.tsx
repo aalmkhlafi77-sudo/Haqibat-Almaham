@@ -70,7 +70,8 @@ const HEATMAP_CATEGORY_META: Record<
 };
 
 export const CalendarView: React.FC = () => {
-  const { db, openRecord, openShareModal, setShowHijri } = useApp();
+  const { db, hasPerm, openRecord, openShareModal, setShowHijri } = useApp();
+  const canWriteRecords = hasPerm('records:write');
   const today = getTodayISO();
   const showHijri = db.preferences.showHijri;
 
@@ -228,18 +229,20 @@ export const CalendarView: React.FC = () => {
             <span>إظهار التاريخ الهجري</span>
           </label>
 
-          <button
-            type="button"
-            onClick={() =>
-              openRecord('calendar_item', null, {
-                scheduledAt: `${selectedDay}T10:00`,
-              })
-            }
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-600 text-white hover:bg-violet-700 text-xs font-semibold whitespace-nowrap"
-          >
-            <Plus className="w-4 h-4" />
-            <span>إضافة حدث / تذكير</span>
-          </button>
+          {canWriteRecords && (
+            <button
+              type="button"
+              onClick={() =>
+                openRecord('calendar_item', null, {
+                  scheduledAt: `${selectedDay}T10:00`,
+                })
+              }
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-600 text-white hover:bg-violet-700 text-xs font-semibold whitespace-nowrap"
+            >
+              <Plus className="w-4 h-4" />
+              <span>إضافة حدث / تذكير</span>
+            </button>
+          )}
         </div>
       </div>
 

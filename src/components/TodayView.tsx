@@ -37,7 +37,8 @@ const TODAY_SECTION_KEYS = [
 ];
 
 export const TodayView: React.FC = () => {
-  const { db, openRecord, setSectionsCollapsed, setActiveNav } = useApp();
+  const { db, hasPerm, openRecord, setSectionsCollapsed, setActiveNav } = useApp();
+  const canWriteRecords = hasPerm('records:write');
   const today = getTodayISO();
   const showHijri = db.preferences.showHijri;
   const warningDays = db.preferences.documentWarningDays;
@@ -126,23 +127,27 @@ export const TodayView: React.FC = () => {
             )}
           </button>
 
-          <button
-            type="button"
-            onClick={() => openRecord('task', null)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-xs font-semibold whitespace-nowrap"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>مهمة جديدة</span>
-          </button>
+          {canWriteRecords && (
+            <>
+              <button
+                type="button"
+                onClick={() => openRecord('task', null)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-xs font-semibold whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>مهمة جديدة</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => openRecord('calendar_item', null)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-violet-300 dark:border-violet-700/70 bg-violet-50/70 dark:bg-violet-950/40 text-violet-800 dark:text-violet-200 hover:bg-violet-100 dark:hover:bg-violet-900/50 text-xs font-semibold whitespace-nowrap"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>حدث / تذكير</span>
-          </button>
+              <button
+                type="button"
+                onClick={() => openRecord('calendar_item', null)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-violet-300 dark:border-violet-700/70 bg-violet-50/70 dark:bg-violet-950/40 text-violet-800 dark:text-violet-200 hover:bg-violet-100 dark:hover:bg-violet-900/50 text-xs font-semibold whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>حدث / تذكير</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 

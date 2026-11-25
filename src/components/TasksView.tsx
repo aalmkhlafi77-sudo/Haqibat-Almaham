@@ -14,7 +14,8 @@ import { TaskItem, TaskStatus } from '../types/domain';
 import { StatusBadge } from './StatusBadge';
 
 export const TasksView: React.FC = () => {
-  const { db, updateTaskFilters, openRecord, openShareModal } = useApp();
+  const { db, hasPerm, updateTaskFilters, openRecord, openShareModal } = useApp();
+  const canWriteRecords = hasPerm('records:write');
   const filters = db.preferences.taskFilters;
   const today = getTodayISO();
   const showHijri = db.preferences.showHijri;
@@ -102,14 +103,16 @@ export const TasksView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => openRecord('task', null)}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-xs font-semibold whitespace-nowrap"
-        >
-          <Plus className="w-4 h-4" />
-          <span>مهمة جديدة</span>
-        </button>
+        {canWriteRecords && (
+          <button
+            type="button"
+            onClick={() => openRecord('task', null)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-xs font-semibold whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4" />
+            <span>مهمة جديدة</span>
+          </button>
+        )}
       </div>
 
       {/* Persistent Filters Bar */}

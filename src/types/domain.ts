@@ -202,7 +202,7 @@ export type ShareChannel = 'whatsapp' | 'email' | 'device';
 
 export interface ShareLog {
   id: string;
-  recordType: RecordType | 'document_renewal' | 'vat_3a';
+  recordType: RecordType | 'document_renewal' | 'vat_3a' | 'report';
   recordId: string;
   recordTitle: string;
   specialistId: string | null;
@@ -354,3 +354,79 @@ export interface AppDatabaseState {
   vat3aDrafts: Vat3ADraft[];
   preferences: AppPreferences;
 }
+
+export type UserRole = 'admin' | 'tax_accountant' | 'operations' | 'viewer';
+
+export type UserPermission =
+  | 'records:read'
+  | 'records:write'
+  | 'records:delete'
+  | 'reports:view'
+  | 'reports:export'
+  | 'vat3a:view'
+  | 'vat3a:edit'
+  | 'backups:export'
+  | 'backups:restore'
+  | 'settings:manage';
+
+export type AuthMode = 'local_demo' | 'server';
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  displayName: string;
+  email: string;
+  role: UserRole;
+  roleLabel: string;
+  specialistId: string | null;
+  permissions: UserPermission[];
+  authMode: AuthMode;
+}
+
+export interface DemoAccountProfile {
+  id: string;
+  username: string;
+  displayName: string;
+  email: string;
+  role: UserRole;
+  roleLabel: string;
+  description: string;
+  specialistId: string | null;
+}
+
+export interface PendingDeepLink {
+  recordType?: RecordType;
+  recordId?: string;
+  nav?: NavSection;
+}
+
+export interface BackupSummaryCounts {
+  organizations: number;
+  specialists: number;
+  documentCategories: number;
+  taskTypes: number;
+  tasks: number;
+  documents: number;
+  documentRenewals: number;
+  cases: number;
+  sessions: number;
+  poas: number;
+  calendarItems: number;
+  labels: number;
+  shareLogs: number;
+  vat3aDrafts: number;
+  vat3aArchivedDrafts: number;
+}
+
+export interface BackupEnvelope {
+  appId: 'haqibat-almaham';
+  schemaVersion: string;
+  createdAt: string;
+  sourceMode: AuthMode;
+  includesAttachments: boolean;
+  attachmentsNote: string;
+  integrityHash: string;
+  counts: BackupSummaryCounts;
+  payload: AppDatabaseState;
+}
+

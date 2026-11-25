@@ -5,8 +5,13 @@ import {
   evaluateVat3ADraft,
 } from '../domain/vat3aEngine';
 import {
+  computeBackupIntegrityHash,
+  validateBackupFileText,
+} from '../domain/backupUtils';
+import {
   AppDatabaseState,
   AppPreferences,
+  BackupEnvelope,
   CalendarItem,
   CaseItem,
   DocumentCategoryItem,
@@ -29,6 +34,44 @@ import {
 } from './seedData';
 
 const STORAGE_KEY = 'haqibat_almaham_db_v1';
+const PRE_RESTORE_SNAPSHOT_KEY = 'haqibat_almaham_pre_restore_snapshot_v1';
+const DEMO_SESSION_PROFILE_KEY = 'haqibat_almaham_demo_profile_id_v1';
+const LAST_BACKUP_META_KEY = 'haqibat_almaham_last_backup_meta_v1';
+
+export function getDemoSessionProfileId(): string | null {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem(DEMO_SESSION_PROFILE_KEY);
+}
+
+export function setDemoSessionProfileId(profileId: string | null): void {
+  if (typeof window === 'undefined') return;
+  if (!profileId) {
+    window.localStorage.removeItem(DEMO_SESSION_PROFILE_KEY);
+  } else {
+    window.localStorage.setItem(DEMO_SESSION_PROFILE_KEY, profileId);
+  }
+}
+
+export interface LastBackupMeta {
+  createdAt: string;
+  schemaVersion: string;
+  sourceMode: 'local_demo' | 'server';
+}
+
+export function getLastBackupMeta(): LastBackupMeta | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(LAST_BACKUP_META_KEY);
+    return raw ? (JSON.parse(raw) as LastBackupMeta) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveLastBackupMeta(meta: LastBackupMeta): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(LAST_BACKUP_META_KEY, JSON.stringify(meta));
+}
 
 export function generateId(prefix: string): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -328,6 +371,7 @@ export interface DataRepository {
   addShareLog(log: Omit<ShareLog, 'id'>): AppDatabaseState;
   upsertVat3ADraft(draft: Vat3ADraft): AppDatabaseState;
   deleteVat3ADraft(draftId: string): AppDatabaseState;
+  restoreBackupPayload(envelope: BackupEnvelope): DeleteOperationResult;
 }
 
 class LocalStorageDataAdapter implements DataRepository {
@@ -837,6 +881,68 @@ class LocalStorageDataAdapter implements DataRepository {
     };
     this.save(next);
     return next;
+  }
+
+  restoreBackupPayload(envelope: BackupEnvelope): DeleteOperationResult {
+    const preSnapshot = this.readRaw();
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(
+          PRE_RESTORE_SNAPSHOT_KEY,
+          JSON.stringify({
+            capturedAt: new Date().toISOString().slice(0, 19),
+            state: preSnapshot,
+          })
+        );
+      } catch {
+        // Proceed with in-memory rollback guarantee even if storage quota is tight
+      }
+    }
+
+    try {
+      const serialized = JSON.stringify(envelope);
+      const check = validateBackupFileText(serialized);
+      if (!check.ok || !check.envelope) {
+        return {
+          ok: false,
+          error: check.error || 'ملف النسخة الاحتياطية غير صالح.',
+          state: preSnapshot,
+        };
+      }
+
+      if (computeBackupIntegrityHash(check.envelope.payload) !== check.envelope.integrityHash) {
+        return {
+          ok: false,
+          error: 'فشل التحقق من سلامة النسخة الاحتياطية؛ لم تتغير البيانات الحالية.',
+          state: preSnapshot,
+        };
+      }
+
+      const migrated = migrateDatabaseState(check.envelope.payload);
+      // Verify critical collections survived migration cleanly
+      if (
+        migrated.tasks.length !== check.envelope.payload.tasks.length ||
+        migrated.documents.length !== check.envelope.payload.documents.length ||
+        migrated.cases.length !== check.envelope.payload.cases.length ||
+        migrated.sessions.length !== check.envelope.payload.sessions.length
+      ) {
+        throw new Error('تعذر التحقق من تطابق أعداد السجلات بعد الترحيل.');
+      }
+
+      this.save(migrated);
+      return { ok: true, state: migrated };
+    } catch (err) {
+      // Atomic rollback to pre-restore snapshot
+      this.save(preSnapshot);
+      return {
+        ok: false,
+        error:
+          err instanceof Error
+            ? `تعذرت الاستعادة (${err.message}) — تم الإبقاء على البيانات الحالية سليمة.`
+            : 'تعذرت الاستعادة — تم الإبقاء على البيانات الحالية سليمة.',
+        state: preSnapshot,
+      };
+    }
   }
 }
 

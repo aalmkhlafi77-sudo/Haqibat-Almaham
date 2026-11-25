@@ -36,7 +36,9 @@ export const LabelsSection: React.FC<LabelsSectionProps> = ({
   targetId,
   compact = false,
 }) => {
-  const { db, saveLabel, deleteLabel } = useApp();
+  const { db, hasPerm, saveLabel, deleteLabel } = useApp();
+  const canWriteLabels = hasPerm('records:write');
+  const canDeleteLabels = hasPerm('records:delete');
   const labels = db.labels.filter(
     (l) => l.targetType === targetType && (l.targetId ?? null) === (targetId ?? null)
   );
@@ -357,7 +359,7 @@ export const LabelsSection: React.FC<LabelsSectionProps> = ({
             </span>
           )}
         </div>
-        {!isAdding && (
+        {!isAdding && canWriteLabels && (
           <button
             type="button"
             onClick={startAdd}
@@ -406,24 +408,32 @@ export const LabelsSection: React.FC<LabelsSectionProps> = ({
                   isDragging ? 'z-30 shadow-xl ring-2 ring-blue-500' : 'z-10'
                 } ${lbl.attentionPulse && !isDragging ? 'label-attention-pulse' : ''}`}
               >
-                <button
-                  type="button"
-                  onPointerDown={(e) => handleDragPointerDown(e, lbl, idx)}
-                  title="اسحب لتحريك الملصق وتثبيته"
-                  aria-label={`مقبض سحب الملصق ${lbl.text}`}
-                  className="p-1 rounded-md hover:bg-black/10 cursor-grab active:cursor-grabbing touch-none shrink-0"
-                >
-                  <GripVertical className="w-3.5 h-3.5 opacity-75" />
-                </button>
+                {canWriteLabels && (
+                  <button
+                    type="button"
+                    onPointerDown={(e) => handleDragPointerDown(e, lbl, idx)}
+                    title="اسحب لتحريك الملصق وتثبيته"
+                    aria-label={`مقبض سحب الملصق ${lbl.text}`}
+                    className="p-1 rounded-md hover:bg-black/10 cursor-grab active:cursor-grabbing touch-none shrink-0"
+                  >
+                    <GripVertical className="w-3.5 h-3.5 opacity-75" />
+                  </button>
+                )}
 
-                <button
-                  type="button"
-                  onClick={() => startEdit(lbl)}
-                  title="انقر لتعديل الملصق"
-                  className="text-right hover:underline focus:outline-none truncate max-w-[260px] sm:max-w-[320px]"
-                >
-                  {lbl.text}
-                </button>
+                {canWriteLabels ? (
+                  <button
+                    type="button"
+                    onClick={() => startEdit(lbl)}
+                    title="انقر لتعديل الملصق"
+                    className="text-right hover:underline focus:outline-none truncate max-w-[260px] sm:max-w-[320px]"
+                  >
+                    {lbl.text}
+                  </button>
+                ) : (
+                  <span className="text-right truncate max-w-[260px] sm:max-w-[320px]">
+                    {lbl.text}
+                  </span>
+                )}
 
                 {lbl.attentionPulse && (
                   <Sparkles
@@ -432,15 +442,17 @@ export const LabelsSection: React.FC<LabelsSectionProps> = ({
                   />
                 )}
 
-                <button
-                  type="button"
-                  onClick={() => deleteLabel(lbl.id)}
-                  title="حذف الملصق"
-                  aria-label={`حذف الملصق ${lbl.text}`}
-                  className="p-1 rounded hover:bg-black/10 transition-colors shrink-0"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {canDeleteLabels && (
+                  <button
+                    type="button"
+                    onClick={() => deleteLabel(lbl.id)}
+                    title="حذف الملصق"
+                    aria-label={`حذف الملصق ${lbl.text}`}
+                    className="p-1 rounded hover:bg-black/10 transition-colors shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             );
           })}

@@ -10,6 +10,7 @@ import {
   ChevronRight,
   FileText,
   Home,
+  LogOut,
   Menu,
   Moon,
   Receipt,
@@ -21,6 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { canAccessNav } from '../domain/authPermissions';
 import {
   resolveDocumentCategoryName,
   resolveTaskTypeName,
@@ -51,6 +53,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     toggleNavGroupCollapsed,
     openRecord,
     showToast,
+    currentUser,
+    logout,
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -495,25 +499,27 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 )}
 
                 {(!isGroupCollapsed || sidebarCollapsed) &&
-                  grp.items.map((item) => {
-                    const isActive = activeNav === item.id;
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => handleSelectNav(item.id)}
-                        title={item.label}
-                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
-                          isActive
-                            ? 'bg-blue-50 text-blue-800 dark:bg-blue-500/15 dark:text-blue-200 border border-blue-200/80 dark:border-blue-500/30'
-                            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 border border-transparent'
-                        }`}
-                      >
-                        <span className={`shrink-0 ${item.accentClass}`}>{item.icon}</span>
-                        {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
-                      </button>
-                    );
-                  })}
+                  grp.items
+                    .filter((item) => canAccessNav(currentUser, item.id))
+                    .map((item) => {
+                      const isActive = activeNav === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => handleSelectNav(item.id)}
+                          title={item.label}
+                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
+                            isActive
+                              ? 'bg-blue-50 text-blue-800 dark:bg-blue-500/15 dark:text-blue-200 border border-blue-200/80 dark:border-blue-500/30'
+                              : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 border border-transparent'
+                          }`}
+                        >
+                          <span className={`shrink-0 ${item.accentClass}`}>{item.icon}</span>
+                          {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+                        </button>
+                      );
+                    })}
               </div>
             );
           })}
@@ -607,8 +613,32 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             )}
           </div>
 
-          {/* Header Actions (Theme Switch + Notifications Bell on Left Side in RTL) */}
+          {/* Header Actions (User + Theme Switch + Notifications Bell on Left Side in RTL) */}
           <div className="flex items-center gap-2 shrink-0">
+            {currentUser && (
+              <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-slate-200 dark:border-white/10">
+                <div className="text-right leading-tight max-w-[165px]">
+                  <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                    {currentUser.displayName}
+                  </div>
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                    {currentUser.roleLabel} ·{' '}
+                    {currentUser.authMode === 'server' ? 'خادم فعلي' : 'معاينة محلية'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={logout}
+                  title="تسجيل الخروج"
+                  aria-label="تسجيل الخروج"
+                  className="h-10 px-2.5 inline-flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-white/15 bg-white/80 dark:bg-white/[0.04] text-slate-700 dark:text-slate-100 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950/50 dark:hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors text-xs font-semibold shrink-0 whitespace-nowrap"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span className="hidden xl:inline">خروج</span>
+                </button>
+              </div>
+            )}
+
             <button
               type="button"
               onClick={toggleTheme}
@@ -788,21 +818,23 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 label: 'الإعدادات وقواعد 3A والتكاملات',
                 icon: <Settings className="w-4 h-4 text-slate-500" />,
               },
-            ].map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => handleSelectNav(item.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${
-                  activeNav === item.id
-                    ? 'bg-blue-50 text-blue-800 dark:bg-blue-500/20 dark:text-blue-200'
-                    : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
-                }`}
-              >
-                {item.icon}
-                <span>{item.label}</span>
-              </button>
-            ))}
+            ]
+              .filter((item) => canAccessNav(currentUser, item.id))
+              .map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleSelectNav(item.id)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${
+                    activeNav === item.id
+                      ? 'bg-blue-50 text-blue-800 dark:bg-blue-500/20 dark:text-blue-200'
+                      : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
+                  }`}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                </button>
+              ))}
             <button
               type="button"
               onClick={() => {
@@ -814,6 +846,22 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
               <span>{isDark ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع السينمائي'}</span>
             </button>
+            {currentUser && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMoreOpen(false);
+                  logout();
+                }}
+                className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl text-sm font-medium border border-rose-200 dark:border-rose-800/60 text-rose-700 dark:text-rose-300"
+              >
+                <span className="flex items-center gap-2">
+                  <LogOut className="w-4 h-4" />
+                  <span>تسجيل الخروج ({currentUser.displayName})</span>
+                </span>
+                <span className="text-xs opacity-80">{currentUser.roleLabel}</span>
+              </button>
+            )}
           </div>
         </div>
       )}

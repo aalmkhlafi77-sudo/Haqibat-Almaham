@@ -25,10 +25,12 @@ const CATEGORIES: DocumentCategoryFilter[] = [
 export const DocumentsView: React.FC = () => {
   const {
     db,
+    hasPerm,
     updateDocumentFilters,
     setDocumentWarningDays,
     openRecord,
   } = useApp();
+  const canWriteRecords = hasPerm('records:write');
   const filters = db.preferences.documentFilters;
   const warningDays = db.preferences.documentWarningDays;
   const today = getTodayISO();
@@ -135,14 +137,16 @@ export const DocumentsView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => openRecord('document', null)}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-teal-600 text-white hover:bg-teal-700 text-xs font-semibold whitespace-nowrap"
-        >
-          <Plus className="w-4 h-4" />
-          <span>وثيقة جديدة</span>
-        </button>
+        {canWriteRecords && (
+          <button
+            type="button"
+            onClick={() => openRecord('document', null)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-teal-600 text-white hover:bg-teal-700 text-xs font-semibold whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4" />
+            <span>وثيقة جديدة</span>
+          </button>
+        )}
       </div>
 
       {/* Category Filter Tabs + Warning Window Setting */}

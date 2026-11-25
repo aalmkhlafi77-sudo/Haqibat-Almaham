@@ -47,6 +47,7 @@ import { StatusBadge } from './StatusBadge';
 export const Vat3AView: React.FC = () => {
   const {
     db,
+    hasPerm,
     saveVat3ADraft,
     deleteVat3ADraft,
     updateVatArchiveFilters,
@@ -54,6 +55,8 @@ export const Vat3AView: React.FC = () => {
     openShareModal,
     showToast,
   } = useApp();
+  const canEditVat = hasPerm('vat3a:edit');
+  const canDeleteVat = canEditVat && hasPerm('records:delete');
 
   const initialWorking =
     db.vat3aDrafts.find((d) => !d.isTestSample && d.status !== 'مؤرشفة') ||
@@ -405,16 +408,18 @@ export const Vat3AView: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={handleCreateNewDraft}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>مسودة جديدة</span>
-          </button>
+          {canEditVat && (
+            <button
+              type="button"
+              onClick={handleCreateNewDraft}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>مسودة جديدة</span>
+            </button>
+          )}
 
-          {!isArchived && (
+          {canEditVat && !isArchived && (
             <button
               type="button"
               onClick={handleSaveDraft}
@@ -472,25 +477,29 @@ export const Vat3AView: React.FC = () => {
             <span>Excel</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => setCopyModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
-          >
-            <Copy className="w-3.5 h-3.5" />
-            <span>نسخ لفترة جديدة</span>
-          </button>
+          {canEditVat && (
+            <>
+              <button
+                type="button"
+                onClick={() => setCopyModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>نسخ لفترة جديدة</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={handleArchiveToggle}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
-          >
-            <Archive className="w-3.5 h-3.5" />
-            <span>{isArchived ? 'إعادة فتح للتعديل' : 'أرشفة'}</span>
-          </button>
+              <button
+                type="button"
+                onClick={handleArchiveToggle}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+              >
+                <Archive className="w-3.5 h-3.5" />
+                <span>{isArchived ? 'إعادة فتح للتعديل' : 'أرشفة'}</span>
+              </button>
+            </>
+          )}
 
-          {db.vat3aDrafts.some((d) => d.id === draft.id) && (
+          {canDeleteVat && db.vat3aDrafts.some((d) => d.id === draft.id) && (
             <button
               type="button"
               onClick={() => setDeleteConfirmId(draft.id)}
@@ -615,7 +624,7 @@ export const Vat3AView: React.FC = () => {
           </label>
           <input
             type="text"
-            disabled={isArchived}
+            disabled={isArchived || !canEditVat}
             value={draft.entityName}
             onChange={(e) => setDraft({ ...draft, entityName: e.target.value })}
             className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-sm disabled:opacity-60"
@@ -628,7 +637,7 @@ export const Vat3AView: React.FC = () => {
           <input
             type="text"
             dir="ltr"
-            disabled={isArchived}
+            disabled={isArchived || !canEditVat}
             value={draft.taxRegistrationNumber}
             onChange={(e) =>
               setDraft({ ...draft, taxRegistrationNumber: e.target.value })
@@ -644,7 +653,7 @@ export const Vat3AView: React.FC = () => {
           <ArabicDatePicker
             mode="date"
             clearable={false}
-            disabled={isArchived}
+            disabled={isArchived || !canEditVat}
             showHijri={db.preferences.showHijri}
             value={draft.periodStart}
             onChange={(nextVal) => setDraft({ ...draft, periodStart: nextVal })}
@@ -658,7 +667,7 @@ export const Vat3AView: React.FC = () => {
           <ArabicDatePicker
             mode="date"
             clearable={false}
-            disabled={isArchived}
+            disabled={isArchived || !canEditVat}
             showHijri={db.preferences.showHijri}
             value={draft.periodEnd}
             onChange={(nextVal) => setDraft({ ...draft, periodEnd: nextVal })}
@@ -670,7 +679,7 @@ export const Vat3AView: React.FC = () => {
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
             <span>حالة السجل:</span>
             <select
-              disabled={isArchived}
+              disabled={isArchived || !canEditVat}
               value={draft.status}
               onChange={(e) =>
                 setDraft({ ...draft, status: e.target.value as Vat3ADraftStatus })
@@ -780,7 +789,7 @@ export const Vat3AView: React.FC = () => {
                           <input
                             type="text"
                             dir="ltr"
-                            disabled={isArchived}
+                            disabled={isArchived || !canEditVat}
                             value={raw.amountRaw}
                             onChange={(e) =>
                               handleLineChange(lineId, 'amountRaw', e.target.value)
@@ -818,7 +827,7 @@ export const Vat3AView: React.FC = () => {
                             <input
                               type="text"
                               dir="ltr"
-                              disabled={isArchived}
+                              disabled={isArchived || !canEditVat}
                               value={raw.adjustmentRaw}
                               onChange={(e) =>
                                 handleLineChange(lineId, 'adjustmentRaw', e.target.value)
@@ -865,7 +874,7 @@ export const Vat3AView: React.FC = () => {
                           <input
                             type="text"
                             dir="ltr"
-                            disabled={isArchived}
+                            disabled={isArchived || !canEditVat}
                             value={raw.amountRaw}
                             onChange={(e) =>
                               handleLineChange(lineId, 'amountRaw', e.target.value)
@@ -1002,7 +1011,7 @@ export const Vat3AView: React.FC = () => {
                         <input
                           type="text"
                           dir="ltr"
-                          disabled={isArchived}
+                          disabled={isArchived || !canEditVat}
                           value={raw.amountRaw}
                           onChange={(e) =>
                             handleLineChange(lineId, 'amountRaw', e.target.value)
@@ -1035,7 +1044,7 @@ export const Vat3AView: React.FC = () => {
                         <input
                           type="text"
                           dir="ltr"
-                          disabled={isArchived}
+                          disabled={isArchived || !canEditVat}
                           value={raw.adjustmentRaw}
                           onChange={(e) =>
                             handleLineChange(lineId, 'adjustmentRaw', e.target.value)
@@ -1059,7 +1068,7 @@ export const Vat3AView: React.FC = () => {
                         <input
                           type="text"
                           dir="ltr"
-                          disabled={isArchived}
+                          disabled={isArchived || !canEditVat}
                           value={raw.amountRaw}
                           onChange={(e) =>
                             handleLineChange(lineId, 'amountRaw', e.target.value)
@@ -1121,7 +1130,7 @@ export const Vat3AView: React.FC = () => {
                   </label>
                   <input
                     type="text"
-                    disabled={isArchived}
+                    disabled={isArchived || !canEditVat}
                     value={draft.item14PeriodRef || ''}
                     onChange={(e) =>
                       setDraft({ ...draft, item14PeriodRef: e.target.value })
@@ -1136,7 +1145,7 @@ export const Vat3AView: React.FC = () => {
                   </label>
                   <input
                     type="text"
-                    disabled={isArchived}
+                    disabled={isArchived || !canEditVat}
                     value={draft.item14Reason || ''}
                     onChange={(e) =>
                       setDraft({ ...draft, item14Reason: e.target.value })
@@ -1156,7 +1165,7 @@ export const Vat3AView: React.FC = () => {
               </label>
               <input
                 type="text"
-                disabled={isArchived}
+                disabled={isArchived || !canEditVat}
                 value={draft.negativeBaseExplanation || ''}
                 onChange={(e) =>
                   setDraft({ ...draft, negativeBaseExplanation: e.target.value })

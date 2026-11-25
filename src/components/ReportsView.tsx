@@ -1,5 +1,16 @@
 import React, { useMemo, useState } from 'react';
-import { BarChart3, Filter, PieChart, RotateCcw } from 'lucide-react';
+import {
+  BarChart3,
+  ChevronDown,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  Filter,
+  Lock,
+  PieChart,
+  RotateCcw,
+  Share2,
+} from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
   evaluateDocumentHealth,
@@ -9,6 +20,12 @@ import {
   getTodayISO,
   toEnglishDigits,
 } from '../domain/dateUtils';
+import {
+  buildReportShareSummaryText,
+  downloadReportExcel,
+  downloadReportPdf,
+  type ReportExportSnapshot,
+} from '../domain/reportExport';
 import { RecordType } from '../types/domain';
 import { ArabicDatePicker } from './ArabicDatePicker';
 import { StatusBadge } from './StatusBadge';
@@ -53,10 +70,11 @@ function getStatusColor(status: string, idx: number): string {
 }
 
 export const ReportsView: React.FC = () => {
-  const { db, openRecord } = useApp();
+  const { db, authMode, hasPerm, openRecord, openShareModal, showToast } = useApp();
   const today = getTodayISO();
   const showHijri = db.preferences.showHijri;
   const warningDays = db.preferences.documentWarningDays;
+  const canExport = hasPerm('reports:export');
 
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -65,6 +83,8 @@ export const ReportsView: React.FC = () => {
   const [operationType, setOperationType] = useState<OperationTypeFilter>('الكل');
   const [statusFilter, setStatusFilter] = useState<string>('الكل');
   const [barMode, setBarMode] = useState<'specialist' | 'month'>('specialist');
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<'pdf' | 'excel' | null>(null);
 
   const getSpecialist = (id: string | null) =>
     db.specialists.find((s) => s.id === id) || null;
@@ -264,6 +284,123 @@ export const ReportsView: React.FC = () => {
     setStatusFilter('الكل');
   };
 
+  const buildReportSnapshot = (): ReportExportSnapshot => {
+    const selectedSpec =
+      specialistId === 'الكل'
+        ? 'الكل'
+        : db.specialists.find((s) => s.id === specialistId)?.name || 'غير محدد';
+
+    return {
+      generatedAt: new Date().toISOString().slice(0, 19),
+      showHijri,
+      filters: {
+        fromDate,
+        toDate,
+        specialistId,
+        specialistName: selectedSpec,
+        departmentName,
+        operationType,
+        statusFilter,
+      },
+      summary: {
+        totalCount,
+        doneCount,
+        urgentCount,
+        activeRemainingCount,
+      },
+      barMode,
+      statusSlices: statusSlices.map((s) => ({
+        label: s.label,
+        count: s.count,
+        pct: s.pct,
+        color: s.color,
+      })),
+      barItems: barItems.arr,
+      rows: filteredRecords,
+    };
+  };
+
+  const verifyServerExportPermission = async (format: 'pdf' | 'excel', rowCount: number) => {
+    if (authMode !== 'server') return true;
+    try {
+      const res = await fetch('/api/reports/export', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: JSON.stringify({ format, rowCount }),
+      });
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string };
+        showToast(err.error || 'الخادم رفض تصدير التقرير لعدم توفر الصلاحية.');
+        return false;
+      }
+      return true;
+    } catch {
+      showToast('تعذر التحقق من صلاحية التصدير على الخادم.');
+      return false;
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    setDownloadMenuOpen(false);
+    if (!canExport) {
+      showToast('صلاحيات حسابك الحالي لا تسمح بتنزيل التقارير.');
+      return;
+    }
+    setExportingFormat('pdf');
+    try {
+      const snapshot = buildReportSnapshot();
+      const allowed = await verifyServerExportPermission('pdf', snapshot.rows.length);
+      if (!allowed) return;
+      await downloadReportPdf(snapshot);
+      showToast(`تم تنزيل التقرير بصيغة PDF (${toEnglishDigits(String(snapshot.rows.length))} سجل).`);
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
+  const handleDownloadExcel = async () => {
+    setDownloadMenuOpen(false);
+    if (!canExport) {
+      showToast('صلاحيات حسابك الحالي لا تسمح بتنزيل التقارير.');
+      return;
+    }
+    setExportingFormat('excel');
+    try {
+      const snapshot = buildReportSnapshot();
+      const allowed = await verifyServerExportPermission('excel', snapshot.rows.length);
+      if (!allowed) return;
+      downloadReportExcel(snapshot);
+      showToast(`تم تنزيل التقرير بصيغة Excel (${toEnglishDigits(String(snapshot.rows.length))} سجل).`);
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
+  const handleShareReport = () => {
+    if (!canExport) {
+      showToast('صلاحيات حسابك الحالي لا تسمح بمشاركة التقارير.');
+      return;
+    }
+    const snapshot = buildReportSnapshot();
+    const periodDesc =
+      fromDate || toDate
+        ? `${fromDate || '...'} ← ${toDate || '...'}`
+        : 'كامل الفترات';
+    openShareModal({
+      recordType: 'report',
+      recordId: `rep-${snapshot.generatedAt.slice(0, 10)}`,
+      recordTitle: `تقرير العمليات والإحصاءات (${toEnglishDigits(String(snapshot.summary.totalCount))} سجل)`,
+      specialistId: specialistId !== 'الكل' ? specialistId : null,
+      scheduledInfo: `${periodDesc} · ${snapshot.filters.specialistName}`,
+      defaultMessage: buildReportShareSummaryText(snapshot),
+      reportSnapshot: snapshot,
+    });
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -277,14 +414,81 @@ export const ReportsView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={resetFilters}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          <span>إعادة ضبط الفلاتر</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleShareReport}
+            disabled={!canExport}
+            title={canExport ? 'مشاركة التقرير المفلتر' : 'يتطلب صلاحية تصدير التقارير'}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 text-xs font-semibold whitespace-nowrap shrink-0"
+          >
+            {canExport ? <Share2 className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+            <span>مشاركة التقرير</span>
+          </button>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                if (!canExport) {
+                  showToast('صلاحيات حسابك الحالي لا تسمح بتنزيل التقارير.');
+                  return;
+                }
+                setDownloadMenuOpen((prev) => !prev);
+              }}
+              disabled={!canExport || exportingFormat !== null}
+              aria-expanded={downloadMenuOpen}
+              aria-haspopup="menu"
+              title={canExport ? 'تنزيل التقرير بصيغة PDF أو Excel' : 'يتطلب صلاحية تصدير التقارير'}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-50 whitespace-nowrap shrink-0"
+            >
+              {canExport ? <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> : <Lock className="w-3.5 h-3.5" />}
+              <span>
+                {exportingFormat === 'pdf'
+                  ? 'جارٍ إعداد PDF...'
+                  : exportingFormat === 'excel'
+                  ? 'جارٍ إعداد Excel...'
+                  : 'تنزيل التقرير'}
+              </span>
+              <ChevronDown className="w-3.5 h-3.5 opacity-70" />
+            </button>
+
+            {downloadMenuOpen && (
+              <div
+                role="menu"
+                className="absolute left-0 top-11 z-40 w-60 glass-panel rounded-xl shadow-2xl p-1.5 space-y-1"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={handleDownloadPdf}
+                  className="w-full text-right px-3 py-2 rounded-lg text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-white/10 flex items-center gap-2"
+                >
+                  <FileText className="w-4 h-4 text-rose-500 shrink-0" />
+                  <span>تنزيل PDF (عربي من اليمين لليسار)</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={handleDownloadExcel}
+                  className="w-full text-right px-3 py-2 rounded-lg text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-white/10 flex items-center gap-2"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <span>تنزيل Excel (.xlsx)</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 whitespace-nowrap shrink-0"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>إعادة ضبط الفلاتر</span>
+          </button>
+        </div>
       </div>
 
       {/* Filters Panel */}

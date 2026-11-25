@@ -1,8 +1,28 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { dataRepository, generateId } from '../data/repository';
+import {
+  dataRepository,
+  generateId,
+  getDemoSessionProfileId,
+  getLastBackupMeta,
+  type LastBackupMeta,
+  saveLastBackupMeta,
+  setDemoSessionProfileId,
+} from '../data/repository';
+import {
+  buildAuthUserFromDemo,
+  canAccessNav,
+  canAccessRecordType,
+  DEMO_ACCOUNTS,
+  hasPermission,
+} from '../domain/authPermissions';
+import { createBackupEnvelope, downloadBackupJson } from '../domain/backupUtils';
+import type { ReportExportSnapshot } from '../domain/reportExport';
 import {
   AppDatabaseState,
   AppPreferences,
+  AuthMode,
+  AuthUser,
+  BackupEnvelope,
   CalendarItem,
   CaseItem,
   DocumentCategoryItem,
@@ -12,6 +32,7 @@ import {
   IntegrationSettings,
   LabelItem,
   NavSection,
+  PendingDeepLink,
   PoaItem,
   RecordType,
   SessionItem,
@@ -24,6 +45,7 @@ import {
   ThemeMode,
   UrgentAlertDays,
   UrgentAlertMotionMode,
+  UserPermission,
   Vat3AArchiveFilters,
   Vat3ADraft,
   Vat3ARulesConfig,
@@ -36,13 +58,21 @@ export interface ActiveRecordTarget {
 }
 
 export interface ShareTargetPayload {
-  recordType: RecordType | 'document_renewal' | 'vat_3a';
+  recordType: RecordType | 'document_renewal' | 'vat_3a' | 'report';
   recordId: string;
   recordTitle: string;
   specialistId: string | null;
   scheduledInfo: string;
   defaultMessage: string;
   vatDraft?: Vat3ADraft;
+  reportSnapshot?: ReportExportSnapshot;
+}
+
+export interface ServerAuthStatus {
+  checked: boolean;
+  reachable: boolean;
+  envAdminConfigured: boolean;
+  hasAdminAccount: boolean;
 }
 
 interface AppContextValue {
@@ -123,6 +153,30 @@ interface AppContextValue {
     type: RecordType | 'specialist' | 'vat3a',
     id: string
   ) => { title: string; impactLines: string[]; blockedReason?: string };
+  currentUser: AuthUser | null;
+  authMode: AuthMode;
+  authLoading: boolean;
+  serverAuthStatus: ServerAuthStatus;
+  pendingDeepLink: PendingDeepLink | null;
+  lastBackupMeta: LastBackupMeta | null;
+  hasPerm: (perm: UserPermission) => boolean;
+  refreshServerAuthStatus: () => Promise<void>;
+  loginDemoAccount: (profileId: string) => { ok: boolean; error?: string };
+  bootstrapServerAdmin: (input: {
+    username: string;
+    displayName: string;
+    email?: string;
+    password: string;
+  }) => Promise<{ ok: boolean; error?: string }>;
+  loginServerAccount: (
+    username: string,
+    password: string
+  ) => Promise<{ ok: boolean; error?: string }>;
+  logout: () => Promise<void>;
+  exportBackup: () => Promise<{ ok: boolean; error?: string; filename?: string }>;
+  restoreBackup: (
+    envelope: BackupEnvelope
+  ) => Promise<{ ok: boolean; error?: string }>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -132,20 +186,161 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeRecord, setActiveRecord] = useState<ActiveRecordTarget | null>(null);
   const [shareTarget, setShareTarget] = useState<ShareTargetPayload | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [pendingDeepLink, setPendingDeepLink] = useState<PendingDeepLink | null>(null);
+  const [lastBackupMeta, setLastBackupMeta] = useState<LastBackupMeta | null>(() =>
+    getLastBackupMeta()
+  );
+  const [serverAuthStatus, setServerAuthStatus] = useState<ServerAuthStatus>({
+    checked: false,
+    reachable: false,
+    envAdminConfigured: false,
+    hasAdminAccount: false,
+  });
 
   useEffect(() => {
     const isDark = db.preferences.theme === 'dark';
     document.documentElement.classList.toggle('dark', isDark);
   }, [db.preferences.theme]);
 
+  const applyPendingDeepLinkAfterLogin = (user: AuthUser, link: PendingDeepLink | null) => {
+    if (!link) {
+      if (!canAccessNav(user, db.preferences.activeNav)) {
+        patchPrefs({ activeNav: 'today' });
+      }
+      return;
+    }
+    if (link.recordType && link.recordId) {
+      if (canAccessRecordType(user, link.recordType)) {
+        setActiveRecord({ type: link.recordType, id: link.recordId });
+        showToast('تم تسجيل الدخول وتوجيهك إلى السجل المطلوب.');
+      } else {
+        showToast(
+          `تم تسجيل الدخول، لكن دور «${user.roleLabel}» لا يملك صلاحية فتح السجل المطلوب.`
+        );
+      }
+    } else if (link.nav) {
+      if (canAccessNav(user, link.nav)) {
+        patchPrefs({ activeNav: link.nav });
+        showToast('تم تسجيل الدخول والانتقال إلى القسم المطلوب.');
+      } else {
+        patchPrefs({ activeNav: 'today' });
+        showToast(
+          `صلاحيات «${user.roleLabel}» لا تسمح بفتح القسم المطلوب؛ تم توجيهك إلى الرئيسية.`
+        );
+      }
+    }
+    setPendingDeepLink(null);
+  };
+
+  const refreshServerAuthStatus = async () => {
+    try {
+      const res = await fetch('/api/auth/status', {
+        method: 'GET',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        setServerAuthStatus({
+          checked: true,
+          reachable: false,
+          envAdminConfigured: false,
+          hasAdminAccount: false,
+        });
+        return;
+      }
+      const data = (await res.json()) as {
+        envAdminConfigured?: boolean;
+        hasAdminAccount?: boolean;
+        authenticated?: boolean;
+        user?: AuthUser | null;
+      };
+      setServerAuthStatus({
+        checked: true,
+        reachable: true,
+        envAdminConfigured: Boolean(data.envAdminConfigured),
+        hasAdminAccount: Boolean(data.hasAdminAccount),
+      });
+      if (data.authenticated && data.user) {
+        setCurrentUser(data.user);
+      }
+    } catch {
+      setServerAuthStatus({
+        checked: true,
+        reachable: false,
+        envAdminConfigured: false,
+        hasAdminAccount: false,
+      });
+    }
+  };
+
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined') {
+      setAuthLoading(false);
+      return;
+    }
     const params = new URLSearchParams(window.location.search);
     const rType = params.get('recordType') as RecordType | null;
     const rId = params.get('recordId');
-    if (rType && rId) {
-      setActiveRecord({ type: rType, id: rId });
+    const navParam = params.get('nav') as NavSection | null;
+    const initialDeepLink: PendingDeepLink | null =
+      rType && rId
+        ? { recordType: rType, recordId: rId }
+        : navParam
+        ? { nav: navParam }
+        : null;
+    if (initialDeepLink) {
+      setPendingDeepLink(initialDeepLink);
     }
+
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/status', {
+          method: 'GET',
+          credentials: 'include',
+        });
+        if (res.ok) {
+          const data = (await res.json()) as {
+            envAdminConfigured?: boolean;
+            hasAdminAccount?: boolean;
+            authenticated?: boolean;
+            user?: AuthUser | null;
+          };
+          setServerAuthStatus({
+            checked: true,
+            reachable: true,
+            envAdminConfigured: Boolean(data.envAdminConfigured),
+            hasAdminAccount: Boolean(data.hasAdminAccount),
+          });
+          if (data.authenticated && data.user) {
+            setCurrentUser(data.user);
+            applyPendingDeepLinkAfterLogin(data.user, initialDeepLink);
+            setAuthLoading(false);
+            return;
+          }
+        }
+      } catch {
+        setServerAuthStatus({
+          checked: true,
+          reachable: false,
+          envAdminConfigured: false,
+          hasAdminAccount: false,
+        });
+      }
+
+      // Fallback to persisted local demo session profile (non-secret ID only)
+      const savedDemoId = getDemoSessionProfileId();
+      if (savedDemoId) {
+        const matched = DEMO_ACCOUNTS.find((a) => a.id === savedDemoId);
+        if (matched) {
+          const demoUser = buildAuthUserFromDemo(matched);
+          setCurrentUser(demoUser);
+          applyPendingDeepLinkAfterLogin(demoUser, initialDeepLink);
+        }
+      }
+      setAuthLoading(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const showToast = (msg: string) => {
@@ -160,17 +355,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const openRecord = (type: RecordType, id: string | null, prefill?: Record<string, unknown>) => {
+    if (!currentUser || !hasPermission(currentUser, 'records:read')) {
+      showToast('الحساب الحالي لا يملك صلاحية قراءة السجلات.');
+      return;
+    }
+    if (id === null && !hasPermission(currentUser, 'records:write')) {
+      showToast('الحساب الحالي لا يملك صلاحية إنشاء سجلات جديدة.');
+      return;
+    }
     setActiveRecord({ type, id, prefill });
   };
 
   const closeRecord = () => setActiveRecord(null);
-  const openShareModal = (payload: ShareTargetPayload) => setShareTarget(payload);
+  const openShareModal = (payload: ShareTargetPayload) => {
+    if (payload.recordType === 'report' && !hasPermission(currentUser, 'reports:export')) {
+      showToast('صلاحيات حسابك لا تسمح بمشاركة أو تصدير التقارير.');
+      return;
+    }
+    setShareTarget(payload);
+  };
   const closeShareModal = () => setShareTarget(null);
 
   const setTheme = (theme: ThemeMode) => patchPrefs({ theme });
   const toggleTheme = () =>
     patchPrefs({ theme: db.preferences.theme === 'light' ? 'dark' : 'light' });
-  const setActiveNav = (activeNav: NavSection) => patchPrefs({ activeNav });
+  const setActiveNav = (activeNav: NavSection) => {
+    if (currentUser && !canAccessNav(currentUser, activeNav)) {
+      showToast(`الحساب الحالي (${currentUser.roleLabel}) لا يملك صلاحية الوصول إلى هذا القسم.`);
+      return;
+    }
+    patchPrefs({ activeNav });
+  };
   const setSidebarCollapsed = (sidebarCollapsed: boolean) => patchPrefs({ sidebarCollapsed });
   const setShowHijri = (showHijri: boolean) => patchPrefs({ showHijri });
   const setCurrentSpecialistId = (currentSpecialistId: string) =>
@@ -181,9 +396,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     patchPrefs({ urgentAlertDays });
   const setUrgentAlertMotion = (urgentAlertMotion: UrgentAlertMotionMode) =>
     patchPrefs({ urgentAlertMotion });
-  const setVat3ARules = (vat3aRules: Vat3ARulesConfig) => patchPrefs({ vat3aRules });
+  const setVat3ARules = (vat3aRules: Vat3ARulesConfig) => {
+    if (!hasPermission(currentUser, 'vat3a:edit')) {
+      showToast('الحساب الحالي لا يملك صلاحية تعديل قواعد 3A.');
+      return;
+    }
+    patchPrefs({ vat3aRules });
+  };
 
   const updateIntegrations = (partial: Partial<IntegrationSettings>) => {
+    if (!hasPermission(currentUser, 'settings:manage')) {
+      showToast('الحساب الحالي لا يملك صلاحية تعديل إعدادات التكامل.');
+      return;
+    }
     patchPrefs({
       integrations: {
         ...db.preferences.integrations,
@@ -336,6 +561,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     id?: string;
     name: string;
   }): DocumentCategoryItem | null => {
+    if (!hasPermission(currentUser, 'settings:manage')) {
+      showToast('الحساب الحالي لا يملك صلاحية إدارة تصنيفات الوثائق.');
+      return null;
+    }
     const clean = input.name.trim();
     if (!clean) return null;
     const duplicate = db.documentCategories.find(
@@ -364,6 +593,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     categoryId: string,
     replacementCategoryId: string | null
   ) => {
+    if (
+      !hasPermission(currentUser, 'settings:manage') ||
+      !hasPermission(currentUser, 'records:delete')
+    ) {
+      showToast('الحساب الحالي لا يملك صلاحية حذف تصنيفات الوثائق.');
+      return;
+    }
     setDb(dataRepository.deleteDocumentCategory(categoryId, replacementCategoryId));
     showToast(
       replacementCategoryId
@@ -383,6 +619,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     isAdminKind?: boolean;
     isRenewalKind?: boolean;
   }): TaskTypeItem | null => {
+    if (!hasPermission(currentUser, 'settings:manage')) {
+      showToast('الحساب الحالي لا يملك صلاحية إدارة أنواع المهام.');
+      return null;
+    }
     const clean = input.name.trim();
     if (!clean) return null;
     const duplicate = db.taskTypes.find(
@@ -410,6 +650,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteTaskType = (typeId: string, replacementTypeId: string): boolean => {
+    if (
+      !hasPermission(currentUser, 'settings:manage') ||
+      !hasPermission(currentUser, 'records:delete')
+    ) {
+      showToast('الحساب الحالي لا يملك صلاحية حذف أنواع المهام.');
+      return false;
+    }
     const res = dataRepository.deleteTaskType(typeId, replacementTypeId);
     setDb(res.state);
     if (!res.ok) {
@@ -437,11 +684,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: existing?.createdAt ?? nowIso(),
       updatedAt: nowIso(),
     };
+    if (!hasPermission(currentUser, 'records:write')) {
+      showToast('الحساب الحالي لا يملك صلاحية تعديل المهام.');
+      return existing ?? item;
+    }
     setDb(dataRepository.upsertTask(item));
     return item;
   };
 
   const deleteTask = (id: string) => {
+    if (!hasPermission(currentUser, 'records:delete')) {
+      showToast('الحساب الحالي لا يملك صلاحية حذف المهام.');
+      return;
+    }
     setDb(dataRepository.deleteTask(id));
     showToast('تم حذف المهمة وتحديث الروابط.');
   };
@@ -461,6 +716,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: existing?.createdAt ?? nowIso(),
       updatedAt: nowIso(),
     };
+    if (!hasPermission(currentUser, 'records:write')) {
+      showToast('الحساب الحالي لا يملك صلاحية تعديل الوثائق.');
+      return existing ?? item;
+    }
     setDb(dataRepository.upsertDocument(item));
     return item;
   };
@@ -469,11 +728,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     documentId: string,
     renewal: Omit<DocumentRenewal, 'id' | 'documentId'>
   ) => {
+    if (!hasPermission(currentUser, 'records:write')) {
+      showToast('الحساب الحالي لا يملك صلاحية تسجيل التجديد.');
+      return;
+    }
     setDb(dataRepository.recordDocumentRenewal(documentId, renewal));
     showToast('تم تسجيل التجديد وحفظ التاريخين السابق والجديد.');
   };
 
   const deleteDocument = (id: string): boolean => {
+    if (!hasPermission(currentUser, 'records:delete')) {
+      showToast('الحساب الحالي لا يملك صلاحية حذف الوثائق.');
+      return false;
+    }
     const res = dataRepository.deleteDocument(id);
     setDb(res.state);
     if (!res.ok) {
@@ -495,11 +762,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: existing?.createdAt ?? nowIso(),
       updatedAt: nowIso(),
     };
+    if (!hasPermission(currentUser, 'records:write')) {
+      showToast('الحساب الحالي لا يملك صلاحية تعديل القضايا.');
+      return existing ?? item;
+    }
     setDb(dataRepository.upsertCase(item));
     return item;
   };
 
   const deleteCase = (id: string) => {
+    if (!hasPermission(currentUser, 'records:delete')) {
+      showToast('الحساب الحالي لا يملك صلاحية حذف القضايا.');
+      return;
+    }
     setDb(dataRepository.deleteCase(id));
     showToast('تم حذف القضية والجلسات المرتبطة وفك الروابط المتأثرة.');
   };
@@ -515,11 +790,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: existing?.createdAt ?? nowIso(),
       updatedAt: nowIso(),
     };
+    if (!hasPermission(currentUser, 'records:write')) {
+      showToast('الحساب الحالي لا يملك صلاحية تعديل الجلسات.');
+      return existing ?? item;
+    }
     setDb(dataRepository.upsertSession(item));
     return item;
   };
 
   const deleteSession = (id: string) => {
+    if (!hasPermission(currentUser, 'records:delete')) {
+      showToast('الحساب الحالي لا يملك صلاحية حذف الجلسات.');
+      return;
+    }
     setDb(dataRepository.deleteSession(id));
     showToast('تم حذف الجلسة وفك الروابط المتأثرة.');
   };
@@ -535,11 +818,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: existing?.createdAt ?? nowIso(),
       updatedAt: nowIso(),
     };
+    if (!hasPermission(currentUser, 'records:write')) {
+      showToast('الحساب الحالي لا يملك صلاحية تعديل الوكالات.');
+      return existing ?? item;
+    }
     setDb(dataRepository.upsertPoa(item));
     return item;
   };
 
   const deletePoa = (id: string) => {
+    if (!hasPermission(currentUser, 'records:delete')) {
+      showToast('الحساب الحالي لا يملك صلاحية حذف الوكالات.');
+      return;
+    }
     setDb(dataRepository.deletePoa(id));
     showToast('تم حذف الوكالة/التفويض.');
   };
@@ -557,11 +848,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: existing?.createdAt ?? nowIso(),
       updatedAt: nowIso(),
     };
+    if (!hasPermission(currentUser, 'records:write')) {
+      showToast('الحساب الحالي لا يملك صلاحية تعديل عناصر التقويم.');
+      return existing ?? item;
+    }
     setDb(dataRepository.upsertCalendarItem(item));
     return item;
   };
 
   const deleteCalendarItem = (id: string) => {
+    if (!hasPermission(currentUser, 'records:delete')) {
+      showToast('الحساب الحالي لا يملك صلاحية حذف عناصر التقويم.');
+      return;
+    }
     setDb(dataRepository.deleteCalendarItem(id));
     showToast('تم حذف العنصر من التقويم.');
   };
@@ -569,6 +868,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const saveLabel = (
     input: Omit<LabelItem, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
   ) => {
+    if (!hasPermission(currentUser, 'records:write')) {
+      showToast('الحساب الحالي لا يملك صلاحية تعديل الملصقات.');
+      return;
+    }
     const existing = input.id ? db.labels.find((l) => l.id === input.id) : undefined;
     const item: LabelItem = {
       ...input,
@@ -580,6 +883,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteLabel = (id: string) => {
+    if (!hasPermission(currentUser, 'records:delete')) {
+      showToast('الحساب الحالي لا يملك صلاحية حذف الملصقات.');
+      return;
+    }
     setDb(dataRepository.deleteLabel(id));
     showToast('تم حذف الملصق.');
   };
@@ -587,6 +894,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const saveSpecialist = (
     input: Omit<Specialist, 'id' | 'orgId'> & { id?: string }
   ) => {
+    if (!hasPermission(currentUser, 'records:write')) {
+      showToast('الحساب الحالي لا يملك صلاحية تعديل بيانات المختصين.');
+      return;
+    }
     const existing = input.id
       ? db.specialists.find((s) => s.id === input.id)
       : undefined;
@@ -600,6 +911,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteSpecialist = (id: string) => {
+    if (!hasPermission(currentUser, 'records:delete')) {
+      showToast('الحساب الحالي لا يملك صلاحية حذف المختصين.');
+      return;
+    }
     setDb(dataRepository.deleteSpecialist(id));
     showToast('تم حذف المختص وتحويل السجلات المرتبطة إلى غير مسندة.');
   };
@@ -632,15 +947,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const saveVat3ADraft = (draft: Vat3ADraft) => {
+    if (!hasPermission(currentUser, 'vat3a:edit')) {
+      showToast('الحساب الحالي لا يملك صلاحية حفظ أو تعديل مسودات 3A.');
+      return;
+    }
     setDb(dataRepository.upsertVat3ADraft(draft));
   };
 
   const deleteVat3ADraft = (id: string) => {
+    if (!hasPermission(currentUser, 'records:delete')) {
+      showToast('الحساب الحالي لا يملك صلاحية حذف المسودات الضريبية.');
+      return;
+    }
     setDb(dataRepository.deleteVat3ADraft(id));
     showToast('تم حذف المسودة الضريبية.');
   };
 
   const resetDemoData = () => {
+    if (!hasPermission(currentUser, 'settings:manage')) {
+      showToast('استعادة البيانات التجريبية محصورة بصلاحية المدير.');
+      return;
+    }
     setDb(dataRepository.resetToDemo());
     setActiveRecord(null);
     showToast('تمت استعادة البيانات التجريبية الافتراضية.');
@@ -760,6 +1087,187 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
+  const authMode: AuthMode = currentUser?.authMode || 'local_demo';
+  const hasPerm = (perm: UserPermission) => hasPermission(currentUser, perm);
+
+  const loginDemoAccount = (profileId: string): { ok: boolean; error?: string } => {
+    const profile = DEMO_ACCOUNTS.find((a) => a.id === profileId);
+    if (!profile) {
+      return { ok: false, error: 'الحساب التجريبي المحدد غير موجود.' };
+    }
+    const user = buildAuthUserFromDemo(profile);
+    setDemoSessionProfileId(profile.id);
+    setCurrentUser(user);
+    if (profile.specialistId) {
+      patchPrefs({ currentSpecialistId: profile.specialistId });
+    }
+    applyPendingDeepLinkAfterLogin(user, pendingDeepLink);
+    return { ok: true };
+  };
+
+  const bootstrapServerAdmin = async (input: {
+    username: string;
+    displayName: string;
+    email?: string;
+    password: string;
+  }): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/auth/bootstrap-admin', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: JSON.stringify(input),
+      });
+      const data = (await res.json()) as { user?: AuthUser; error?: string };
+      if (!res.ok || !data.user) {
+        return { ok: false, error: data.error || 'تعذر تفعيل حساب المدير الأول.' };
+      }
+      setDemoSessionProfileId(null);
+      setCurrentUser(data.user);
+      setServerAuthStatus((prev) => ({ ...prev, reachable: true, hasAdminAccount: true }));
+      applyPendingDeepLinkAfterLogin(data.user, pendingDeepLink);
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'تعذر الاتصال بالخادم لتفعيل حساب المدير.' };
+    }
+  };
+
+  const loginServerAccount = async (
+    username: string,
+    password: string
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = (await res.json()) as { user?: AuthUser; error?: string };
+      if (!res.ok || !data.user) {
+        return { ok: false, error: data.error || 'فشل تسجيل الدخول على الخادم.' };
+      }
+      setDemoSessionProfileId(null);
+      setCurrentUser(data.user);
+      applyPendingDeepLinkAfterLogin(data.user, pendingDeepLink);
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'تعذر الاتصال بخادم المصادقة.' };
+    }
+  };
+
+  const logout = async () => {
+    if (currentUser?.authMode === 'server') {
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        });
+      } catch {
+        // ignore network error on logout
+      }
+    }
+    setDemoSessionProfileId(null);
+    setCurrentUser(null);
+    setActiveRecord(null);
+    setShareTarget(null);
+  };
+
+  const exportBackup = async (): Promise<{
+    ok: boolean;
+    error?: string;
+    filename?: string;
+  }> => {
+    if (!hasPerm('backups:export')) {
+      return { ok: false, error: 'صلاحيات الحساب الحالي لا تسمح بتصدير النسخ الاحتياطية.' };
+    }
+    if (authMode === 'server') {
+      try {
+        const res = await fetch('/api/backups/export', {
+          method: 'GET',
+          credentials: 'include',
+        });
+        const data = (await res.json()) as BackupEnvelope & { error?: string };
+        if (!res.ok) {
+          return { ok: false, error: data.error || 'فشل تصدير النسخة الاحتياطية من الخادم.' };
+        }
+        const filename = downloadBackupJson(data);
+        const meta: LastBackupMeta = {
+          createdAt: data.createdAt,
+          schemaVersion: data.schemaVersion,
+          sourceMode: 'server',
+        };
+        saveLastBackupMeta(meta);
+        setLastBackupMeta(meta);
+        showToast('تم تنزيل النسخة الاحتياطية من الخادم بنجاح.');
+        return { ok: true, filename };
+      } catch {
+        return { ok: false, error: 'تعذر الاتصال بالخادم لتنزيل النسخة الاحتياطية.' };
+      }
+    }
+
+    const envelope = createBackupEnvelope(db, 'local_demo');
+    const filename = downloadBackupJson(envelope);
+    const meta: LastBackupMeta = {
+      createdAt: envelope.createdAt,
+      schemaVersion: envelope.schemaVersion,
+      sourceMode: 'local_demo',
+    };
+    saveLastBackupMeta(meta);
+    setLastBackupMeta(meta);
+    showToast('تم تنزيل النسخة الاحتياطية من بيانات المتصفح بنجاح.');
+    return { ok: true, filename };
+  };
+
+  const restoreBackup = async (
+    envelope: BackupEnvelope
+  ): Promise<{ ok: boolean; error?: string }> => {
+    if (!hasPerm('backups:restore')) {
+      return { ok: false, error: 'صلاحيات الحساب الحالي لا تسمح باستعادة النسخ الاحتياطية.' };
+    }
+
+    if (authMode === 'server') {
+      try {
+        const res = await fetch('/api/backups/restore', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+          body: JSON.stringify(envelope),
+        });
+        const data = (await res.json()) as { ok?: boolean; error?: string };
+        if (!res.ok || !data.ok) {
+          return {
+            ok: false,
+            error: data.error || 'فشل الخادم في التحقق من النسخة الاحتياطية أو استعادتها.',
+          };
+        }
+        showToast('تمت استعادة النسخة الاحتياطية على الخادم بعد التحقق من سلامتها.');
+        return { ok: true };
+      } catch {
+        return { ok: false, error: 'تعذر الاتصال بالخادم لتنفيذ الاستعادة.' };
+      }
+    }
+
+    const res = dataRepository.restoreBackupPayload(envelope);
+    setDb(res.state);
+    if (!res.ok) {
+      return { ok: false, error: res.error || 'فشلت استعادة النسخة الاحتياطية.' };
+    }
+    setActiveRecord(null);
+    showToast('تمت استعادة النسخة الاحتياطية بنجاح مع الحفاظ على جميع الروابط والقواعد.');
+    return { ok: true };
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -819,6 +1327,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteVat3ADraft,
         resetDemoData,
         getDeleteImpact,
+        currentUser,
+        authMode,
+        authLoading,
+        serverAuthStatus,
+        pendingDeepLink,
+        lastBackupMeta,
+        hasPerm,
+        refreshServerAuthStatus,
+        loginDemoAccount,
+        bootstrapServerAdmin,
+        loginServerAccount,
+        logout,
+        exportBackup,
+        restoreBackup,
       }}
     >
       {children}

@@ -45,6 +45,7 @@ export const RecordDrawer: React.FC = () => {
   const {
     db,
     activeRecord,
+    hasPerm,
     closeRecord,
     openRecord,
     openShareModal,
@@ -64,6 +65,8 @@ export const RecordDrawer: React.FC = () => {
     getDeleteImpact,
     showToast,
   } = useApp();
+  const canWriteRecords = hasPerm('records:write');
+  const canDeleteRecords = hasPerm('records:delete');
 
   const [isDirty, setIsDirty] = useState(false);
   const [discardPromptOpen, setDiscardPromptOpen] = useState(false);
@@ -512,9 +515,14 @@ export const RecordDrawer: React.FC = () => {
         {/* Header */}
         <div className="px-4 lg:px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 shrink-0">
           <div className="min-w-0">
-            <h2 className="text-base lg:text-lg font-bold text-slate-900 dark:text-white truncate">
-              {headerTitleMap[activeRecord.type]}
-            </h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base lg:text-lg font-bold text-slate-900 dark:text-white truncate">
+                {headerTitleMap[activeRecord.type]}
+              </h2>
+              {!canWriteRecords && (
+                <StatusBadge label="وضع القراءة فقط" tone="neutral" />
+              )}
+            </div>
             {existingTask && (
               <div className="mt-1 flex flex-wrap items-center gap-2">
                 <StatusBadge
@@ -849,7 +857,7 @@ export const RecordDrawer: React.FC = () => {
           {/* DOCUMENT FORM */}
           {activeRecord.type === 'document' && (
             <div className="space-y-4">
-              {existingDoc && (
+              {existingDoc && canWriteRecords && (
                 <div className="flex flex-wrap items-center gap-2 glass-surface-subtle rounded-xl p-3">
                   <button
                     type="button"
@@ -1327,14 +1335,16 @@ export const RecordDrawer: React.FC = () => {
                       <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
                         الجلسات المرتبطة ({db.sessions.filter((s) => s.caseId === existingCase.id).length})
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => openRecord('session', null, { caseId: existingCase.id })}
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-violet-600 dark:text-violet-400 hover:underline"
-                      >
-                        <CalendarPlus className="w-3.5 h-3.5" />
-                        <span>إضافة جلسة للقضية</span>
-                      </button>
+                      {canWriteRecords && (
+                        <button
+                          type="button"
+                          onClick={() => openRecord('session', null, { caseId: existingCase.id })}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-violet-600 dark:text-violet-400 hover:underline"
+                        >
+                          <CalendarPlus className="w-3.5 h-3.5" />
+                          <span>إضافة جلسة للقضية</span>
+                        </button>
+                      )}
                     </div>
                     <div className="space-y-1.5">
                       {db.sessions
@@ -1821,7 +1831,7 @@ export const RecordDrawer: React.FC = () => {
         {/* Footer Actions */}
         <div className="px-4 lg:px-6 py-3.5 border-t border-slate-200 dark:border-white/10 flex flex-wrap items-center justify-between gap-2 shrink-0 bg-slate-50/70 dark:bg-[#0a0b0f]/90">
           <div className="flex items-center gap-2">
-            {activeRecord.id && (
+            {activeRecord.id && canDeleteRecords && (
               <button
                 type="button"
                 onClick={() => setDeleteConfirmOpen(true)}
@@ -1920,16 +1930,18 @@ export const RecordDrawer: React.FC = () => {
               onClick={attemptClose}
               className="px-4 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-800"
             >
-              إلغاء
+              {canWriteRecords ? 'إلغاء' : 'إغلاق'}
             </button>
-            <button
-              type="submit"
-              form="record-drawer-form"
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-xs font-semibold"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>حفظ</span>
-            </button>
+            {canWriteRecords && (
+              <button
+                type="submit"
+                form="record-drawer-form"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-xs font-semibold"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>حفظ</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

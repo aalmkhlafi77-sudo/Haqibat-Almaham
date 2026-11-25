@@ -18,10 +18,13 @@ import { StatusBadge } from './StatusBadge';
 export const SpecialistsView: React.FC = () => {
   const {
     db,
+    hasPerm,
     saveSpecialist,
     deleteSpecialist,
     getDeleteImpact,
   } = useApp();
+  const canWriteRecords = hasPerm('records:write');
+  const canDeleteRecords = hasPerm('records:delete');
 
   const [editing, setEditing] = useState<Partial<Specialist> | null>(null);
   const [formError, setFormError] = useState('');
@@ -76,14 +79,16 @@ export const SpecialistsView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={startNew}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-xs font-semibold"
-        >
-          <Plus className="w-4 h-4" />
-          <span>إضافة مختص</span>
-        </button>
+        {canWriteRecords && (
+          <button
+            type="button"
+            onClick={startNew}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-xs font-semibold"
+          >
+            <Plus className="w-4 h-4" />
+            <span>إضافة مختص</span>
+          </button>
+        )}
       </div>
 
       {/* Add / Edit Form */}
@@ -213,25 +218,29 @@ export const SpecialistsView: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setFormError('');
-                  setEditing({ ...sp });
-                }}
-                className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-                title="تعديل"
-              >
-                <Pencil className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setDeleteTargetId(sp.id)}
-                className="p-2 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/60"
-                title="حذف"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              {canWriteRecords && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormError('');
+                    setEditing({ ...sp });
+                  }}
+                  className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  title="تعديل"
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
+              )}
+              {canDeleteRecords && (
+                <button
+                  type="button"
+                  onClick={() => setDeleteTargetId(sp.id)}
+                  className="p-2 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/60"
+                  title="حذف"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
         ))}
