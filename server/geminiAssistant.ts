@@ -40,7 +40,7 @@ const riyadhDate = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit',
 });
 
-function getGemini(model: string) {
+export function getGemini(model: string) {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) throw new RequestError(503, 'أضف مفتاح Gemini إلى متغيرات الخادم أولًا.');
   const selected = modelName.safeParse(effectiveGeminiModel(model));
@@ -48,7 +48,7 @@ function getGemini(model: string) {
   return { client: new GoogleGenAI({ apiKey }), model: selected.data };
 }
 
-function providerError(error: unknown): RequestError {
+export function providerError(error: unknown): RequestError {
   const code = typeof error === 'object' && error ? (error as { status?: number }).status : undefined;
   if (code === 429) return new RequestError(429, 'بلغ Gemini حد الاستخدام. حاول مجددًا لاحقًا.');
   if (code === 401 || code === 403) {
