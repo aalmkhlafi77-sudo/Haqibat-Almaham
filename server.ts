@@ -653,12 +653,18 @@ async function startServer() {
   });
 }
 
+export async function runServer() {
+  try {
+    await startServer();
+  } catch (err) {
+    console.error('Failed to start server:', (err as { code?: string })?.code || (err instanceof Error ? err.message : 'unknown error'));
+    process.exit(1);
+  }
+}
+
 if (
   process.argv[1] &&
   pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
 ) {
-  startServer().catch((err) => {
-    console.error('Failed to start server:', (err as { code?: string })?.code || (err instanceof Error ? err.message : 'unknown error'));
-    process.exit(1);
-  });
+  await runServer();
 }
