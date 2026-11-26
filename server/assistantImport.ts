@@ -17,15 +17,31 @@ const importRequest = assistantQuestion.pick({ question: true, history: true }).
 const reminderDays = z.number().int().min(1).max(365).nullable();
 const title = z.string().trim().max(200);
 const reference = z.string().trim().max(100);
-const modelResult = z.object({
-  message: z.string().trim().max(500),
+// Gemini expands bounded arrays when compiling its output grammar. Keep the
+// provider shape small and enforce the batch, text and date limits locally.
+const providerRow = z.object({
+  name: z.string(),
+  referenceNumber: z.string(),
+  issuingAuthority: z.string(),
+  sourceDate: z.string(),
+  categoryHint: z.string(),
+  specialistHint: z.string(),
+});
+const providerResult = z.object({
+  message: z.string(),
   overflow: z.boolean(),
+  reminderDays: z.number().nullable(),
+  rows: z.array(providerRow),
+});
+const providerSchema = z.toJSONSchema(providerResult, { target: 'draft-7' });
+const modelResult = providerResult.extend({
+  message: z.string().trim().max(500),
   reminderDays,
-  rows: z.array(z.object({
+  rows: z.array(providerRow.extend({
     name: title,
     referenceNumber: reference,
     issuingAuthority: title,
-    sourceDate: z.string().trim().max(100),
+    sourceDate: reference,
     categoryHint: title,
     specialistHint: title,
   })).max(IMPORT_MAX_ROWS),
@@ -101,15 +117,19 @@ export async function draftAssistantImport(input: ReturnType<typeof unpackImport
           'في جدول المركبات، جهّز صفًا منفصلًا لرخصة السير وصفًا للتأمين لكل لوحة ولكل نوع مطلوب. اجعل الاسم مميزًا بنوع الوثيقة ورقم اللوحة، واستعمل رقم اللوحة في referenceNumber في الصفين.',
           'انقل التاريخ حرفيًا من الخلية في sourceDate بدون تفسير أو تغيير ترتيب اليوم والشهر، وانقل جهة الإصدار واسم المختص فقط عند وجودهما. ضع نصًا فارغًا للبيانات الناقصة.',
           'اجعل categoryHint اسم نوع الوثيقة، مثل رخص سير المركبات أو تأمين المركبات. reminders اختيارية، وreminderDays عدد صحيح بين 1 و365 فقط عند طلب عدد أيام محدد في المحادثة، وإلا null.',
+          'إذا طلب المستخدم مدد تذكير متعددة أو كتب مددًا متعارضة، ضع reminderDays بقيمة null واطلب منه اختيار مدة واحدة. إذا حدد مدة واحدة في آخر رسالة، اعتمدها.',
           `إذا تجاوز عدد السجلات المطلوبة ${IMPORT_MAX_ROWS}، أعد overflow=true وrows فارغة. لا تقتطع دفعة أو تتجاوز صفًا ناقصًا بصمت.`,
         ].join('\n'),
         responseMimeType: 'application/json',
-        responseJsonSchema: z.toJSONSchema(modelResult),
+        responseJsonSchema: providerSchema,
         maxOutputTokens: 16_384,
       },
     });
     output = response.text;
   } catch (error) {
+    if (typeof error === 'object' && error && 'status' in error && error.status === 400) {
+      throw new RequestError(502, 'رفض Gemini طلب قراءة المرفق. جرّب سؤالًا نصيًا دون مرفق للتحقق من الاتصال، ثم أعد محاولة قراءة الملف.');
+    }
     throw providerError(error);
   }
   let result: z.infer<typeof modelResult>;
