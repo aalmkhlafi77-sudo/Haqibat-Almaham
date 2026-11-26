@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { rateLimit } from 'express-rate-limit';
+import { z } from 'zod';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { migrateDatabaseState, StateDataRepository } from './src/data/repository';
 import { createPreviewStore, openMysqlStore, type ServerUserAccount, type Workspace, type WorkspaceStore } from './server/workspaceStore';
@@ -11,6 +12,7 @@ import { applyWorkspaceCommand, assertRestorableWorkspace, RequestError } from '
 import { taskItemSchema, vat3ADraftSchema, vat3ARulesConfigSchema } from './server/workspaceSchemas';
 import {
   hasPermission,
+  PRIMARY_ADMIN_ID,
   ROLE_LABELS,
   ROLE_PERMISSIONS,
 } from './src/domain/authPermissions';
@@ -27,8 +29,7 @@ import type {
 
 interface SessionPayload {
   uid: string;
-  username: string;
-  role: UserRole;
+  proof: string;
   exp: number;
 }
 
@@ -57,7 +58,14 @@ function safeCompareSecret(a: string, b: string): boolean {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
-function signSessionToken(payload: SessionPayload): string {
+function accountSessionProof(account: ServerUserAccount): string {
+  return crypto.createHmac('sha256', RUNTIME_SESSION_SECRET)
+    .update(JSON.stringify([account.id, account.passwordSalt, account.passwordHash]))
+    .digest('base64url');
+}
+
+function signSessionToken(account: ServerUserAccount): string {
+  const payload: SessionPayload = { uid: account.id, proof: accountSessionProof(account), exp: Date.now() + SESSION_TTL_MS };
   const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
   const sig = crypto
     .createHmac('sha256', RUNTIME_SESSION_SECRET)
@@ -77,7 +85,7 @@ function verifySessionToken(token: string): SessionPayload | null {
   if (!safeCompareSecret(sig, expectedSig)) return null;
   try {
     const decoded = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as SessionPayload;
-    if (!decoded || typeof decoded.uid !== 'string' || typeof decoded.exp !== 'number') {
+    if (!decoded || typeof decoded.uid !== 'string' || typeof decoded.proof !== 'string' || typeof decoded.exp !== 'number') {
       return null;
     }
     if (Date.now() > decoded.exp) return null;
@@ -181,7 +189,7 @@ export function createServerApp(store: WorkspaceStore = createPreviewStore()) {
     role: 'admin',
     specialistId: 'spec-01',
     passwordSalt: '',
-    passwordHash: '',
+    passwordHash: getEnvAdminPasscode(),
     isActive: true,
     createdAt: new Date().toISOString().slice(0, 19),
   });
@@ -198,11 +206,11 @@ export function createServerApp(store: WorkspaceStore = createPreviewStore()) {
     if (!token) return null;
     const payload = verifySessionToken(token);
     if (!payload) return null;
-    if (payload.uid === 'srv-admin-env' && isEnvAdminConfigured()) {
-      return toPublicAuthUser(buildEnvAdminAccount());
-    }
-    const found = (await store.users()).find((u) => u.id === payload.uid && u.isActive);
-    return found ? toPublicAuthUser(found) : null;
+    const account = payload.uid === 'srv-admin-env' && isEnvAdminConfigured()
+      ? buildEnvAdminAccount()
+      : (await store.users()).find((u) => u.id === payload.uid && u.isActive);
+    return account && safeCompareSecret(payload.proof, accountSessionProof(account))
+      ? toPublicAuthUser(account) : null;
   };
 
   // Origin / Custom-header CSRF protection for cookie-authenticated mutations
@@ -374,7 +382,7 @@ export function createServerApp(store: WorkspaceStore = createPreviewStore()) {
 
     const { salt, hash } = hashPasswordScrypt(cleanPass);
     const adminAcc: ServerUserAccount = {
-      id: 'srv-admin-01',
+      id: PRIMARY_ADMIN_ID,
       username: cleanUser,
       displayName: cleanName,
       email: cleanEmail,
@@ -389,12 +397,7 @@ export function createServerApp(store: WorkspaceStore = createPreviewStore()) {
       return res.status(409).json({ error: 'تم تفعيل حساب المدير الأول مسبقًا.' });
     }
 
-    const token = signSessionToken({
-      uid: adminAcc.id,
-      username: adminAcc.username,
-      role: adminAcc.role,
-      exp: Date.now() + SESSION_TTL_MS,
-    });
+    const token = signSessionToken(adminAcc);
     setSessionCookie(res, token, shared);
     return res.status(201).json({
       user: toPublicAuthUser(adminAcc),
@@ -420,12 +423,7 @@ export function createServerApp(store: WorkspaceStore = createPreviewStore()) {
         return res.status(401).json({ error: 'بيانات الدخول غير صحيحة.' });
       }
       const envAdmin = buildEnvAdminAccount();
-      const token = signSessionToken({
-        uid: envAdmin.id,
-        username: envAdmin.username,
-        role: envAdmin.role,
-        exp: Date.now() + SESSION_TTL_MS,
-      });
+      const token = signSessionToken(envAdmin);
       setSessionCookie(res, token, shared);
       return res.json({ user: toPublicAuthUser(envAdmin), token });
     }
@@ -435,12 +433,7 @@ export function createServerApp(store: WorkspaceStore = createPreviewStore()) {
       return res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة.' });
     }
 
-    const token = signSessionToken({
-      uid: acc.id,
-      username: acc.username,
-      role: acc.role,
-      exp: Date.now() + SESSION_TTL_MS,
-    });
+    const token = signSessionToken(acc);
     setSessionCookie(res, token, shared);
     return res.json({ user: toPublicAuthUser(acc), token });
   }));
@@ -505,6 +498,67 @@ export function createServerApp(store: WorkspaceStore = createPreviewStore()) {
       return res.status(409).json({ error: 'اسم المستخدم مسجل مسبقًا.' });
     }
     return res.status(201).json({ user: toPublicAuthUser(created) });
+  }));
+
+  const managedUser = (
+    req: Request, operation: 'edit' | 'reset' | 'delete',
+    update: (account: ServerUserAccount, accounts: readonly ServerUserAccount[]) => ServerUserAccount | null,
+  ) => {
+    const actor = (req as Request & { authUser: AuthUser }).authUser;
+    return store.changeUser(req.params.id, (target, accounts) => {
+      const activeAdmin = accounts.some((account) => account.id === actor.id && account.isActive && account.role === 'admin');
+      if (!activeAdmin && !(actor.id === 'srv-admin-env' && isEnvAdminConfigured())) {
+        throw new RequestError(403, 'تتطلب هذه العملية صلاحية مدير النظام.');
+      }
+      if (!target) throw new RequestError(404, 'الحساب غير موجود.');
+      if (target.id === PRIMARY_ADMIN_ID && (actor.id !== target.id || operation === 'delete')) {
+        throw new RequestError(403, 'حساب مالك النظام محمي.');
+      }
+      if (operation === 'delete' && target.id === actor.id) {
+        throw new RequestError(403, 'لا يمكنك حذف حسابك الحالي.');
+      }
+      return update(target, accounts);
+    });
+  };
+
+  const accountUpdate = z.object({
+    username: z.string().trim().toLowerCase().min(3).max(100),
+    displayName: z.string().trim().max(200),
+    email: z.union([z.email().max(254), z.literal('')]).optional(),
+    role: z.enum(['admin', 'tax_accountant', 'operations', 'viewer']),
+  });
+
+  app.patch('/api/auth/users/:id', requireAuth, requirePermission('settings:manage'), asyncRoute(async (req, res) => {
+    const input = accountUpdate.safeParse(req.body);
+    if (!input.success) throw new RequestError(400, 'تحقق من اسم المستخدم والاسم الظاهر والدور.');
+    const { username, displayName, email, role } = input.data;
+    const updated = await managedUser(req, 'edit', (account, accounts) => {
+      const actor = (req as Request & { authUser: AuthUser }).authUser;
+      if (account.id === actor.id && role !== account.role) {
+        throw new RequestError(403, 'لا يمكنك تغيير دور حسابك الحالي.');
+      }
+      if (accounts.some((other) => other.id !== account.id && other.username === username)) {
+        throw new RequestError(409, 'اسم المستخدم مسجل مسبقًا.');
+      }
+      return { ...account, username, displayName: displayName || username, email: email ?? account.email, role };
+    });
+    res.json({ user: toPublicAuthUser(updated!) });
+  }));
+
+  app.post('/api/auth/users/:id/reset-password', requireAuth, requirePermission('settings:manage'), asyncRoute(async (req, res) => {
+    const input = z.object({ password: z.string().min(shared ? 12 : 6).max(256) }).safeParse(req.body);
+    if (!input.success) throw new RequestError(400, `كلمة المرور يجب أن تكون بين ${shared ? 12 : 6} و256 حرفًا.`);
+    await managedUser(req, 'reset', (account) => {
+      const { salt, hash } = hashPasswordScrypt(input.data.password);
+      return { ...account, passwordSalt: salt, passwordHash: hash };
+    });
+    if ((req as Request & { authUser: AuthUser }).authUser.id === req.params.id) clearSessionCookie(res, shared);
+    res.json({ ok: true });
+  }));
+
+  app.delete('/api/auth/users/:id', requireAuth, requirePermission('settings:manage'), asyncRoute(async (req, res) => {
+    await managedUser(req, 'delete', () => null);
+    res.json({ ok: true });
   }));
 
   app.get('/api/state', requireAuth, requirePermission('records:read'), asyncRoute(async (req, res) => {
@@ -646,7 +700,7 @@ async function provisionOwner(store: WorkspaceStore) {
   }
   const { salt, hash } = hashPasswordScrypt(password);
   const created = await store.addUser({
-    id: 'srv-admin-01', username, displayName, email, role: 'admin', specialistId: null,
+    id: PRIMARY_ADMIN_ID, username, displayName, email, role: 'admin', specialistId: null,
     passwordSalt: salt, passwordHash: hash, isActive: true, createdAt: new Date().toISOString(),
   }, true);
   if (!created && !(await store.users()).some((user) => user.role === 'admin' && user.isActive)) {
