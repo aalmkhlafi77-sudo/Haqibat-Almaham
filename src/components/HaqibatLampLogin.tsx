@@ -19,12 +19,22 @@ interface HaqibatLampLoginProps {
 
 const PULL_THRESHOLD = 30;
 const MAX_PULL = 52;
+const lampColors = [
+  { id: 'white', label: 'أبيض طبيعي', color: '#f5f4ee' },
+  { id: 'green', label: 'أخضر فسفوري', color: '#a6ff00' },
+  { id: 'red', label: 'أحمر نيون', color: '#ff313f' },
+  { id: 'blue', label: 'أزرق نيون', color: '#25a0ff' },
+  { id: 'yellow', label: 'أصفر', color: '#f5c76a' },
+] as const;
+
+type LampColor = typeof lampColors[number];
 
 export default function HaqibatLampLogin({
   children,
   title = 'حقيبة المهام',
 }: HaqibatLampLoginProps) {
   const [lit, setLit] = useState(false);
+  const [lightColor, setLightColor] = useState<LampColor>(lampColors[4]);
   const [pull, setPull] = useState(0);
   const [dragging, setDragging] = useState(false);
   const formId = useId();
@@ -63,12 +73,29 @@ export default function HaqibatLampLogin({
 
   return (
     <main className="haq-lamp" dir="rtl" data-lit={lit} data-dragging={dragging}
-      style={{ '--haq-pull': `${pull}px` } as CSSProperties}>
+      style={{
+        '--haq-pull': `${pull}px`,
+        '--haq-light': lightColor.id === 'yellow' ? undefined : lightColor.color,
+      } as CSSProperties}>
       <style>{lampStyles}</style>
       <div className="haq-lamp__ambient" aria-hidden="true" />
       <div className="haq-lamp__layout">
         <div className="haq-lamp__intro">
           <h1>{title}</h1>
+          <div className="haq-lamp__colors" role="group" aria-label="لون إضاءة المصباح">
+            {lampColors.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className="haq-lamp__color"
+                aria-label={option.label}
+                aria-pressed={lightColor.id === option.id}
+                title={option.label}
+                style={{ '--haq-swatch': option.color } as CSSProperties}
+                onClick={() => setLightColor(option)}
+              />
+            ))}
+          </div>
           <div className="haq-lamp__fixture">
             <div className="haq-lamp__shade" aria-hidden="true" />
             <div className="haq-lamp__bulb" aria-hidden="true" />
@@ -130,7 +157,7 @@ const lampStyles = `
 .haq-lamp[data-lit="true"] { background: #11100f; }
 .haq-lamp__ambient {
   position: absolute; inset: 0; pointer-events: none;
-  background: radial-gradient(ellipse at 72% 42%, #f3ad4930, transparent 64%);
+  background: radial-gradient(ellipse at 72% 42%, color-mix(in srgb, var(--haq-light, #f3ad49) 19%, transparent), transparent 64%);
   opacity: 0; transition: opacity 420ms ease;
 }
 .haq-lamp[data-lit="true"] .haq-lamp__ambient { opacity: 1; }
@@ -141,6 +168,18 @@ const lampStyles = `
 }
 .haq-lamp__intro { display: grid; place-items: center; text-align: center; }
 .haq-lamp__intro h1 { margin: 0 0 18px; font-weight: 750; font-size: clamp(24px, 4vw, 38px); }
+.haq-lamp__colors { display: flex; margin: -8px 0 4px; }
+.haq-lamp__color {
+  display: grid; place-items: center; width: 44px; height: 44px; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; cursor: pointer;
+}
+.haq-lamp__color::before {
+  content: ''; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--haq-swatch); box-shadow: 0 0 9px var(--haq-swatch);
+}
+.haq-lamp__color[aria-pressed="true"]::before {
+  outline: 2px solid #f4f1ea; outline-offset: 4px;
+}
 .haq-lamp__fixture { width: 230px; height: 230px; position: relative; direction: ltr; }
 .haq-lamp__shade {
   position: absolute; z-index: 3; top: 8px; left: 46px; width: 138px; height: 57px;
@@ -153,12 +192,16 @@ const lampStyles = `
   border-radius: 50%; background: #35343a; transition: box-shadow 350ms, background 350ms;
 }
 .haq-lamp[data-lit="true"] .haq-lamp__bulb {
-  background: #fff2bd; box-shadow: 0 6px 30px 12px #ffc76299;
+  background: var(--haq-light, #fff2bd);
+  box-shadow: 0 6px 30px 12px color-mix(in srgb, var(--haq-light, #ffc762) 60%, transparent);
 }
 .haq-lamp__beam {
   position: absolute; top: 61px; left: -80px; width: 390px; height: 230px;
   clip-path: polygon(38% 0, 62% 0, 100% 100%, 0 100%);
-  background: linear-gradient(#ffc96b66, #f4ae4120 70%, transparent);
+  background: linear-gradient(
+    color-mix(in srgb, var(--haq-light, #ffc96b) 40%, transparent),
+    color-mix(in srgb, var(--haq-light, #f4ae41) 13%, transparent) 70%, transparent
+  );
   opacity: 0; transition: opacity 420ms ease; pointer-events: none;
 }
 .haq-lamp[data-lit="true"] .haq-lamp__beam { opacity: 1; }
@@ -194,7 +237,7 @@ const lampStyles = `
   border-radius: 12px; cursor: pointer; background: #211b13; color: #ffe2a7;
   font: inherit;
 }
-.haq-lamp :is(.haq-lamp__pull, .haq-lamp__reveal):focus-visible {
+.haq-lamp :is(.haq-lamp__pull, .haq-lamp__reveal, .haq-lamp__color):focus-visible {
   outline: 2px solid var(--haq-gold); outline-offset: 3px;
 }
 .haq-lamp__form {
@@ -209,7 +252,7 @@ const lampStyles = `
   .haq-lamp__fixture { height: 200px; }
   .haq-lamp__stand { height: 111px; }
   .haq-lamp[data-lit="false"] .haq-lamp__form { height: 0; overflow: hidden; }
-  .haq-lamp__ambient { background: radial-gradient(ellipse at 50% 35%, #f3ad4930, transparent 65%); }
+  .haq-lamp__ambient { background: radial-gradient(ellipse at 50% 35%, color-mix(in srgb, var(--haq-light, #f3ad49) 19%, transparent), transparent 65%); }
 }
 @media (prefers-reduced-motion: reduce) {
   .haq-lamp :is(.haq-lamp__ambient, .haq-lamp__beam, .haq-lamp__bulb,
