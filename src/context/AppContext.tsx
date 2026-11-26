@@ -1091,9 +1091,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const vd = db.vat3aDrafts.find((x) => x.id === id);
+    const isArchived = vd?.status === 'مؤرشفة' || !!vd?.archivedAt;
+    const impactLines: string[] = ['سيتم حذف المسودة وبنودها الـ 16 نهائيًا من السجلات.'];
+    if (isArchived) {
+      impactLines.push('هذه المسودة مؤرشفة؛ سيؤدي الحذف إلى إزالتها نهائيًا من أرشيف الضريبة المحفوظ.');
+    }
     return {
       title: vd ? `${vd.entityName} (${vd.periodStart} ← ${vd.periodEnd})` : 'المسودة الضريبية',
-      impactLines: ['سيتم حذف المسودة وبنودها الـ 16 نهائيًا.'],
+      impactLines,
     };
   };
 

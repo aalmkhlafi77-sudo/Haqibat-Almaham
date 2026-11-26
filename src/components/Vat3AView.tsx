@@ -376,6 +376,13 @@ export const Vat3AView: React.FC = () => {
   };
 
   const deleteImpact = deleteConfirmId ? getDeleteImpact('vat3a', deleteConfirmId) : null;
+  const targetDeleteDraft = useMemo(() => {
+    if (!deleteConfirmId) return null;
+    return (
+      db.vat3aDrafts.find((d) => d.id === deleteConfirmId) ||
+      (draft.id === deleteConfirmId ? draft : null)
+    );
+  }, [deleteConfirmId, db.vat3aDrafts, draft]);
   const activePrintDraft = printTargetDraft || draft;
   const activePrintEval = useMemo(
     () => evaluateVat3ADraft(activePrintDraft, db.preferences.vat3aRules),
@@ -1322,83 +1329,99 @@ export const Vat3AView: React.FC = () => {
             </div>
 
             <div className="divide-y divide-slate-100 dark:divide-white/10">
-              {filteredArchive.map((item) => (
-                <div
-                  key={item.id}
-                  className="py-2.5 first:pt-0 last:pb-0 flex flex-wrap items-center justify-between gap-2"
-                >
-                  <div className="min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenSavedDraft(item)}
-                      className="text-right text-sm font-bold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline block truncate"
-                    >
-                      {item.entityName}
-                    </button>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap gap-x-2 mt-0.5 font-mono-tabular">
-                      <span>
-                        الفترة: {formatDisplayDate(item.periodStart, showHijri)} ←{' '}
-                        {formatDisplayDate(item.periodEnd, showHijri)}
-                      </span>
-                      <span>·</span>
-                      <span dir="ltr" className="font-semibold">
-                        الصافي: {formatHalalas(item.computedNetHalalas)} ر.س
-                      </span>
+              {filteredArchive.length === 0 ? (
+                <div className="py-6 text-center text-xs text-slate-500 dark:text-slate-400">
+                  لا توجد مسودات مطابقة لمعايير الأرشيف الحالية.
+                </div>
+              ) : (
+                filteredArchive.map((item) => (
+                  <div
+                    key={item.id}
+                    className="py-2.5 first:pt-0 last:pb-0 flex flex-wrap items-center justify-between gap-2"
+                  >
+                    <div className="min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenSavedDraft(item)}
+                        className="text-right text-sm font-bold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline block truncate"
+                      >
+                        {item.entityName}
+                      </button>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap gap-x-2 mt-0.5 font-mono-tabular">
+                        <span>
+                          الفترة: {formatDisplayDate(item.periodStart, showHijri)} ←{' '}
+                          {formatDisplayDate(item.periodEnd, showHijri)}
+                        </span>
+                        <span>·</span>
+                        <span dir="ltr" className="font-semibold">
+                          الصافي: {formatHalalas(item.computedNetHalalas)} ر.س
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <StatusBadge
+                        label={item.status}
+                        tone={item.status === 'مؤرشفة' ? 'neutral' : 'success'}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleOpenSavedDraft(item)}
+                        className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-white/15 text-xs font-medium hover:bg-slate-100 dark:hover:bg-white/10"
+                      >
+                        فتح
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleShareDraft(item)}
+                        className="p-1.5 rounded-lg border border-slate-200 dark:border-white/15 text-xs text-blue-600 dark:text-blue-400 hover:bg-slate-100 dark:hover:bg-white/10"
+                        title="مشاركة"
+                      >
+                        <Share2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handlePrintDraft(item)}
+                        className="p-1.5 rounded-lg border border-slate-200 dark:border-white/15 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10"
+                        title="طباعة"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          downloadVat3APdf(item);
+                          showToast('تم تحميل PDF للسجل.');
+                        }}
+                        className="px-2 py-1 rounded-lg border border-slate-200 dark:border-white/15 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:bg-slate-100 dark:hover:bg-white/10"
+                        title="تحميل PDF"
+                      >
+                        PDF
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          downloadVat3AExcel(item);
+                          showToast('تم تحميل Excel للسجل.');
+                        }}
+                        className="px-2 py-1 rounded-lg border border-slate-200 dark:border-white/15 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-slate-100 dark:hover:bg-white/10"
+                        title="تحميل Excel"
+                      >
+                        Excel
+                      </button>
+                      {canDeleteVat && (
+                        <button
+                          type="button"
+                          onClick={() => setDeleteConfirmId(item.id)}
+                          className="p-1.5 rounded-lg border border-rose-200 dark:border-rose-900/50 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors"
+                          title={`حذف مسودة «${item.entityName}»`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <StatusBadge
-                      label={item.status}
-                      tone={item.status === 'مؤرشفة' ? 'neutral' : 'success'}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleOpenSavedDraft(item)}
-                      className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-white/15 text-xs font-medium hover:bg-slate-100 dark:hover:bg-white/10"
-                    >
-                      فتح
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleShareDraft(item)}
-                      className="p-1.5 rounded-lg border border-slate-200 dark:border-white/15 text-xs text-blue-600 dark:text-blue-400 hover:bg-slate-100 dark:hover:bg-white/10"
-                      title="مشاركة"
-                    >
-                      <Share2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handlePrintDraft(item)}
-                      className="p-1.5 rounded-lg border border-slate-200 dark:border-white/15 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10"
-                      title="طباعة"
-                    >
-                      <Printer className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        downloadVat3APdf(item);
-                        showToast('تم تحميل PDF للسجل.');
-                      }}
-                      className="px-2 py-1 rounded-lg border border-slate-200 dark:border-white/15 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:bg-slate-100 dark:hover:bg-white/10"
-                      title="تحميل PDF"
-                    >
-                      PDF
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        downloadVat3AExcel(item);
-                        showToast('تم تحميل Excel للسجل.');
-                      }}
-                      className="px-2 py-1 rounded-lg border border-slate-200 dark:border-white/15 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-slate-100 dark:hover:bg-white/10"
-                      title="تحميل Excel"
-                    >
-                      Excel
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         )}
@@ -1536,25 +1559,70 @@ export const Vat3AView: React.FC = () => {
       )}
 
       {/* Delete Confirmation */}
-      {deleteConfirmId && deleteImpact && (
+      {deleteConfirmId && (targetDeleteDraft || deleteImpact) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
-          <div className="glass-panel max-w-md w-full rounded-2xl p-5 space-y-4">
-            <h3 className="text-base font-bold text-rose-700 dark:text-rose-300">
-              تأكيد حذف المسودة الضريبية
+          <div className="glass-panel max-w-md w-full rounded-2xl p-5 space-y-4 shadow-2xl">
+            <h3 className="text-base font-bold text-rose-700 dark:text-rose-300 flex items-center gap-2">
+              <Trash2 className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0" />
+              <span>تأكيد حذف المسودة الضريبية</span>
             </h3>
-            <p className="text-sm text-slate-700 dark:text-slate-200">
-              هل تريد حذف «{deleteImpact.title}»؟
-            </p>
-            <div className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 rounded-xl p-3">
-              {deleteImpact.impactLines.map((l, i) => (
-                <div key={i}>{l}</div>
-              ))}
+
+            <div className="space-y-3 text-sm text-slate-700 dark:text-slate-200">
+              <p>
+                هل أنت متأكد من رغبتك في حذف مسودة «
+                <span className="font-bold">
+                  {targetDeleteDraft?.entityName || deleteImpact?.title || 'المسودة الضريبية'}
+                </span>
+                »؟
+              </p>
+
+              {targetDeleteDraft && (
+                <div className="rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 p-3 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 dark:text-slate-400">المنشأة:</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-100">
+                      {targetDeleteDraft.entityName}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 dark:text-slate-400">الفترة الضريبية:</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-100 font-mono-tabular">
+                      {formatDisplayDate(targetDeleteDraft.periodStart, showHijri)} ←{' '}
+                      {formatDisplayDate(targetDeleteDraft.periodEnd, showHijri)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 dark:text-slate-400">الحالة:</span>
+                    <StatusBadge
+                      label={targetDeleteDraft.status}
+                      tone={targetDeleteDraft.status === 'مؤرشفة' ? 'neutral' : 'success'}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 dark:text-slate-400">صافي الضريبة:</span>
+                    <span dir="ltr" className="font-bold text-slate-900 dark:text-white font-mono-tabular">
+                      {formatHalalas(targetDeleteDraft.computedNetHalalas)} ر.س
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {targetDeleteDraft?.status === 'مؤرشفة' ? (
+                <div className="rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-3 text-xs text-amber-800 dark:text-amber-200 leading-relaxed">
+                  <strong>قواعد حماية السجلات المؤرشفة:</strong> هذه المسودة مودعة في الأرشيف الضريبي المحفوظ. سيؤدي تأكيد الحذف إلى إزالتها نهائيًا من الأرشيف وسجلات الضريبة دون إمكانية استرجاعها.
+                </div>
+              ) : (
+                <div className="rounded-xl bg-slate-100 dark:bg-white/5 p-2.5 text-xs text-slate-600 dark:text-slate-300">
+                  سيتم حذف هذه المسودة وبنودها الـ 16 نهائيًا من النظام.
+                </div>
+              )}
             </div>
-            <div className="flex justify-end gap-2">
+
+            <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
                 onClick={() => setDeleteConfirmId(null)}
-                className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-medium"
+                className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-white/15 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
               >
                 تراجع
               </button>
@@ -1563,10 +1631,23 @@ export const Vat3AView: React.FC = () => {
                 onClick={() => {
                   const id = deleteConfirmId;
                   setDeleteConfirmId(null);
+                  const wasOpen = draft.id === id;
                   deleteVat3ADraft(id);
-                  handleCreateNewDraft();
+                  if (wasOpen) {
+                    const remaining = db.vat3aDrafts.filter((d) => d.id !== id);
+                    const nextWorking =
+                      remaining.find((d) => !d.isTestSample && d.status !== 'مؤرشفة') ||
+                      remaining[0];
+                    if (nextWorking) {
+                      setDraft(structuredClone(nextWorking));
+                      setLastWorkingDraftId(nextWorking.id);
+                    } else {
+                      handleCreateNewDraft();
+                    }
+                    showToast('تم حذف المسودة المفتوحة بنجاح والانتقال إلى مسودة أخرى.');
+                  }
                 }}
-                className="px-3.5 py-2 rounded-xl bg-rose-600 text-white text-xs font-semibold"
+                className="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 shadow-sm transition-colors"
               >
                 تأكيد الحذف
               </button>
