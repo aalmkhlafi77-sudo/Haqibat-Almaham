@@ -141,20 +141,26 @@ export const RecordDrawer: React.FC = () => {
         ? db.documents.find((d) => d.id === activeRecord.id)
         : undefined;
       if (existing) {
+        if (canWriteRecords && typeof prefill.renewalDate === 'string') {
+          setRenewalNewDate(prefill.renewalDate);
+          setRenewalNotes(typeof prefill.renewalNotes === 'string' ? prefill.renewalNotes : '');
+          setRenewalActor('');
+          setRenewalOpen(true);
+        }
         setDocForm({ ...existing, noExpiry: !existing.expiryDate });
       } else {
         const defaultCat = db.documentCategories[0] || null;
         setDocForm({
-          name: '',
-          categoryId: defaultCat ? defaultCat.id : null,
+          name: (prefill.name as string | undefined) ?? '',
+          categoryId: (prefill.categoryId as string | undefined) ?? defaultCat?.id ?? null,
           docType: defaultCat ? defaultCat.name : 'غير مصنفة',
-          referenceNumber: '',
-          issuingAuthority: '',
-          specialistId: db.preferences.currentSpecialistId,
-          issueDate: today,
-          expiryDate: '',
+          referenceNumber: (prefill.referenceNumber as string | undefined) ?? '',
+          issuingAuthority: (prefill.issuingAuthority as string | undefined) ?? '',
+          specialistId: 'specialistId' in prefill ? prefill.specialistId as string | null : db.preferences.currentSpecialistId,
+          issueDate: (prefill.issueDate as string | undefined) ?? today,
+          expiryDate: (prefill.expiryDate as string | undefined) ?? '',
           noExpiry: false,
-          notes: '',
+          notes: (prefill.notes as string | undefined) ?? '',
         });
       }
     } else if (activeRecord.type === 'case') {
@@ -165,13 +171,13 @@ export const RecordDrawer: React.FC = () => {
         existing
           ? { ...existing }
           : {
-              caseNumber: '',
-              title: '',
-              parties: '',
-              court: '',
+              caseNumber: (prefill.caseNumber as string | undefined) ?? '',
+              title: (prefill.title as string | undefined) ?? '',
+              parties: (prefill.parties as string | undefined) ?? '',
+              court: (prefill.court as string | undefined) ?? '',
               status: 'مفتوحة',
-              lawyerSpecialistId: db.preferences.currentSpecialistId,
-              notes: '',
+              lawyerSpecialistId: 'lawyerSpecialistId' in prefill ? prefill.lawyerSpecialistId as string | null : db.preferences.currentSpecialistId,
+              notes: (prefill.notes as string | undefined) ?? '',
             }
       );
     } else if (activeRecord.type === 'session') {
@@ -183,13 +189,13 @@ export const RecordDrawer: React.FC = () => {
           ? { ...existing }
           : {
               caseId: (prefill.caseId as string) || db.cases[0]?.id || '',
-              title: '',
-              scheduledAt: `${today}T10:00`,
+              title: (prefill.title as string | undefined) ?? '',
+              scheduledAt: (prefill.scheduledAt as string | undefined) ?? `${today}T10:00`,
               status: 'مجدولة',
               outcome: '',
-              specialistId: db.preferences.currentSpecialistId,
-              location: '',
-              notes: '',
+              specialistId: 'specialistId' in prefill ? prefill.specialistId as string | null : db.preferences.currentSpecialistId,
+              location: (prefill.location as string | undefined) ?? '',
+              notes: (prefill.notes as string | undefined) ?? '',
             }
       );
     } else if (activeRecord.type === 'poa') {
@@ -200,17 +206,17 @@ export const RecordDrawer: React.FC = () => {
         existing
           ? { ...existing, noExpiry: !existing.expiryDate }
           : {
-              title: '',
-              referenceNumber: '',
-              grantor: '',
-              agent: '',
-              scope: '',
-              specialistId: db.preferences.currentSpecialistId,
-              issueDate: today,
-              expiryDate: '',
+              title: (prefill.title as string | undefined) ?? '',
+              referenceNumber: (prefill.referenceNumber as string | undefined) ?? '',
+              grantor: (prefill.grantor as string | undefined) ?? '',
+              agent: (prefill.agent as string | undefined) ?? '',
+              scope: (prefill.scope as string | undefined) ?? '',
+              specialistId: 'specialistId' in prefill ? prefill.specialistId as string | null : db.preferences.currentSpecialistId,
+              issueDate: (prefill.issueDate as string | undefined) ?? today,
+              expiryDate: (prefill.expiryDate as string | undefined) ?? '',
               noExpiry: false,
               statusOverride: null,
-              notes: '',
+              notes: (prefill.notes as string | undefined) ?? '',
             }
       );
     } else if (activeRecord.type === 'calendar_item') {
@@ -233,7 +239,7 @@ export const RecordDrawer: React.FC = () => {
             }
       );
     }
-  }, [activeRecord, db.tasks, db.documents, db.cases, db.sessions, db.poas, db.calendarItems, db.preferences.currentSpecialistId, today]);
+  }, [activeRecord, db.tasks, db.documents, db.cases, db.sessions, db.poas, db.calendarItems, db.preferences.currentSpecialistId, today, canWriteRecords]);
 
   if (!activeRecord) return null;
 

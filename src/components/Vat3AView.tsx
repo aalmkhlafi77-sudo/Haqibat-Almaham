@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Archive,
@@ -47,6 +47,8 @@ import { StatusBadge } from './StatusBadge';
 export const Vat3AView: React.FC = () => {
   const {
     db,
+    assistantHandoff,
+    setAssistantHandoff,
     hasPerm,
     saveVat3ADraft,
     deleteVat3ADraft,
@@ -109,6 +111,27 @@ export const Vat3AView: React.FC = () => {
     15: true,
     16: true,
   });
+
+  useEffect(() => {
+    if (assistantHandoff?.kind === 'vat_new' && canEditVat) {
+      const next: Vat3ADraft = {
+        ...makeBlankDraft(),
+        entityName: assistantHandoff.entityName,
+        taxRegistrationNumber: assistantHandoff.taxRegistrationNumber || '',
+        periodStart: assistantHandoff.periodStart,
+        periodEnd: assistantHandoff.periodEnd,
+        lines: { ...createEmptyVat3ALines(), ...assistantHandoff.lines },
+      };
+      setDraft(next);
+      setLastWorkingDraftId(next.id);
+      setAssistantHandoff(null);
+    }
+    if (assistantHandoff?.kind === 'vat_saved') {
+      const saved = db.vat3aDrafts.find((item) => item.id === assistantHandoff.id);
+      if (saved) setDraft(structuredClone(saved));
+      setAssistantHandoff(null);
+    }
+  }, [assistantHandoff, canEditVat, db.vat3aDrafts, setAssistantHandoff]);
 
   const evalResult = useMemo(
     () => evaluateVat3ADraft(draft, db.preferences.vat3aRules),

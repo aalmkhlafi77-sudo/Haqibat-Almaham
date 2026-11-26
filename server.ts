@@ -321,7 +321,12 @@ export function createServerApp(store: WorkspaceStore = createPreviewStore()) {
     if (workspace.state.preferences.integrations.aiProvider !== 'server_gemini') {
       throw new RequestError(409, 'اختر Google Gemini من إعدادات المساعد.');
     }
-    res.json(await answerAssistant(input.data.question, workspace.state, hasPermission(user, 'records:write'), input.data.mode));
+    res.json(await answerAssistant(input.data, workspace.state, {
+      canWrite: hasPermission(user, 'records:write'),
+      canViewVat: hasPermission(user, 'vat3a:view'),
+      canEditVat: hasPermission(user, 'vat3a:edit'),
+      canViewReports: hasPermission(user, 'reports:view'),
+    }));
   }));
 
   app.get('/api/auth/status', asyncRoute(async (req, res) => {

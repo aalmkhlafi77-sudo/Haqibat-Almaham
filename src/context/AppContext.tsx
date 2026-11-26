@@ -10,7 +10,7 @@ import {
   saveLastBackupMeta,
   setDemoSessionProfileId,
 } from '../data/repository';
-import { effectiveGeminiModel } from '../domain/assistant';
+import { effectiveGeminiModel, type AssistantHandoff } from '../domain/assistant';
 import { createEmptyDatabase } from '../data/seedData';
 import {
   fetchWorkspace, loadPersonalPreferences, personalPreferences, savePersonalPreferences,
@@ -89,6 +89,8 @@ export interface ServerAuthStatus {
 interface AppContextValue {
   db: AppDatabaseState;
   activeRecord: ActiveRecordTarget | null;
+  assistantHandoff: AssistantHandoff | null;
+  setAssistantHandoff: (target: AssistantHandoff | null) => void;
   shareTarget: ShareTargetPayload | null;
   toast: string | null;
   showToast: (msg: string) => void;
@@ -213,6 +215,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     dbRef.current = state;
     updateDb(state);
   };
+  const [assistantHandoff, setAssistantHandoff] = useState<AssistantHandoff | null>(null);
   const [activeRecord, setActiveRecord] = useState<ActiveRecordTarget | null>(null);
   const [shareTarget, setShareTarget] = useState<ShareTargetPayload | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -1276,6 +1279,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setDemoSessionProfileId(null);
     setCurrentUser(null);
     setActiveRecord(null);
+    setAssistantHandoff(null);
     setShareTarget(null);
   };
 
@@ -1375,6 +1379,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       value={{
         db,
         activeRecord,
+        assistantHandoff,
+        setAssistantHandoff,
         shareTarget,
         toast,
         showToast,
