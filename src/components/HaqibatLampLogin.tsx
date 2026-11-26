@@ -9,6 +9,7 @@
  * Interaction reference: UI Vault / Lamp Login Animation
  * https://github.com/aalmkhlafi77-sudo/ui-vault/tree/94332157e2e12acd5b452e74e938f6c7355f8f1f/src/library-items/lamp-login-animation
  */
+import { DesignerSignature, HaqibatMark } from './HaqibatBrand';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent, ReactNode } from 'react';
 
@@ -89,7 +90,10 @@ export default function HaqibatLampLogin({
       <div className="haq-lamp__ambient" aria-hidden="true" />
       <div className="haq-lamp__layout">
         <div className="haq-lamp__intro">
-          <h1>{title}</h1>
+          <h1 className="flex items-center justify-center gap-3">
+            <HaqibatMark size="large" />
+            <span>{title}</span>
+          </h1>
           <div className="haq-lamp__colors" role="group" aria-label="لون إضاءة المصباح">
             {lampColors.map((option) => (
               <button
@@ -159,6 +163,9 @@ export default function HaqibatLampLogin({
           {children}
         </div>
       </div>
+      <footer className="relative self-end pt-4 text-center">
+        <DesignerSignature appearance="lamp" />
+      </footer>
     </main>
   );
 }
@@ -169,12 +176,14 @@ const lampStyles = `
   --haq-pull: 0px;
   min-height: 100svh;
   display: grid;
+  grid-template-rows: 1fr auto;
   place-items: center;
   position: relative;
   isolation: isolate;
   overflow: clip;
   box-sizing: border-box;
   padding: clamp(18px, 5vw, 56px);
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
   background: #08090c;
   color: #f4f1ea;
 }

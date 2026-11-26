@@ -1,9 +1,9 @@
+import { DesignerSignature, HaqibatMark } from './HaqibatBrand';
 import { AssistantPanel } from './AssistantPanel';
 import React, { useMemo, useState } from 'react';
 import {
   BarChart3,
   Bell,
-  Briefcase,
   CalendarDays,
   CheckSquare,
   ChevronDown,
@@ -450,20 +450,18 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           sidebarCollapsed ? 'w-[76px]' : 'w-[264px]'
         }`}
       >
-        <div className="shrink-0 flex items-center justify-between gap-2 px-4 h-16 border-b border-slate-200 dark:border-white/10">
-          {!sidebarCollapsed && (
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <Briefcase className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
-                <span className="font-bold text-base text-slate-900 dark:text-white truncate">
-                  حقيبة المهام
-                </span>
+        <div className={`shrink-0 flex items-center justify-between h-16 border-b border-slate-200 dark:border-white/10 ${sidebarCollapsed ? 'gap-0.5 px-1.5' : 'gap-2 px-4'}`}>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <HaqibatMark size={sidebarCollapsed ? 'small' : 'regular'} />
+            {!sidebarCollapsed && (
+              <div className="min-w-0">
+                <div className="truncate text-base font-bold text-slate-900 dark:text-white">حقيبة المهام</div>
+                <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                  متابعة المهام والوثائق والمواعيد
+                </p>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                متابعة المهام والوثائق والمواعيد
-              </p>
-            </div>
-          )}
+            )}
+          </div>
           <button
             type="button"
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -525,11 +523,14 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             );
           })}
         </nav>
+        <footer className="shrink-0 border-t border-slate-200 px-1.5 py-2 text-center dark:border-white/10">
+          <DesignerSignature />
+        </footer>
       </aside>
 
       {/* Main Column — dynamically offsets right padding on desktop for open/collapsed fixed sidebar */}
       <div
-        className={`flex-1 flex flex-col min-w-0 pb-20 lg:pb-0 transition-[padding] duration-200 ${
+        className={`flex-1 flex flex-col min-w-0 pb-[calc(6.5rem+env(safe-area-inset-bottom))] lg:pb-0 transition-[padding] duration-200 ${
           sidebarCollapsed ? 'lg:pr-[76px]' : 'lg:pr-[264px]'
         }`}
       >
@@ -537,8 +538,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         <header className="sticky top-0 z-30 h-14 lg:h-16 px-3 lg:px-6 flex items-center justify-between gap-3 border-b border-slate-200 dark:border-white/10 bg-white/90 dark:bg-[#0a0b0f]/88 backdrop-blur-md">
           {/* Mobile Brand */}
           <div className="flex items-center gap-2 lg:hidden shrink-0">
-            <Briefcase className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            <span className="font-bold text-sm text-slate-900 dark:text-white whitespace-nowrap">
+            <HaqibatMark size="small" />
+            <span className="hidden font-bold text-sm text-slate-900 dark:text-white whitespace-nowrap min-[400px]:inline">
               حقيبة المهام
             </span>
           </div>
@@ -729,49 +730,54 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Mobile Bottom Navigation Bar */}
       <nav
         aria-label="التنقل السفلي"
-        className="lg:hidden fixed bottom-0 right-0 left-0 z-40 h-16 bg-white/95 dark:bg-[#0c0d11]/95 backdrop-blur-md border-t border-slate-200 dark:border-white/10 grid grid-cols-5 items-center"
+        className="lg:hidden fixed bottom-0 right-0 left-0 z-40 bg-white/95 dark:bg-[#0c0d11]/95 backdrop-blur-md border-t border-slate-200 dark:border-white/10 pb-[env(safe-area-inset-bottom)]"
       >
-        {[
-          { id: 'today' as NavSection, label: 'اليوم', icon: <Home className="w-5 h-5" /> },
-          { id: 'tasks' as NavSection, label: 'المهام', icon: <CheckSquare className="w-5 h-5" /> },
-          {
-            id: 'calendar' as NavSection,
-            label: 'التقويم',
-            icon: <CalendarDays className="w-5 h-5" />,
-          },
-          { id: 'documents' as NavSection, label: 'الوثائق', icon: <FileText className="w-5 h-5" /> },
-        ].map((tab) => {
-          const active = activeNav === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => handleSelectNav(tab.id)}
-              className={`min-h-[44px] flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${
-                active
-                  ? 'text-blue-600 dark:text-blue-400 font-bold'
-                  : 'text-slate-500 dark:text-slate-400'
-              }`}
-            >
-              {tab.icon}
-              <span className="whitespace-nowrap">{tab.label}</span>
-            </button>
-          );
-        })}
+        <div className="grid h-16 grid-cols-5 items-center">
+          {[
+            { id: 'today' as NavSection, label: 'اليوم', icon: <Home className="w-5 h-5" /> },
+            { id: 'tasks' as NavSection, label: 'المهام', icon: <CheckSquare className="w-5 h-5" /> },
+            {
+              id: 'calendar' as NavSection,
+              label: 'التقويم',
+              icon: <CalendarDays className="w-5 h-5" />,
+            },
+            { id: 'documents' as NavSection, label: 'الوثائق', icon: <FileText className="w-5 h-5" /> },
+          ].map((tab) => {
+            const active = activeNav === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => handleSelectNav(tab.id)}
+                className={`min-h-[44px] flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${
+                  active
+                    ? 'text-blue-600 dark:text-blue-400 font-bold'
+                    : 'text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                {tab.icon}
+                <span className="whitespace-nowrap">{tab.label}</span>
+              </button>
+            );
+          })}
 
-        <button
-          type="button"
-          onClick={() => setMobileMoreOpen(!mobileMoreOpen)}
-          className={`min-h-[44px] flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${
-            ['cases', 'reports', 'vat3a', 'specialists', 'settings'].includes(activeNav) ||
-            mobileMoreOpen
-              ? 'text-blue-600 dark:text-blue-400 font-bold'
-              : 'text-slate-500 dark:text-slate-400'
-          }`}
-        >
-          <Menu className="w-5 h-5" />
-          <span className="whitespace-nowrap">المزيد</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setMobileMoreOpen(!mobileMoreOpen)}
+            className={`min-h-[44px] flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${
+              ['cases', 'reports', 'vat3a', 'specialists', 'settings'].includes(activeNav) ||
+              mobileMoreOpen
+                ? 'text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-slate-500 dark:text-slate-400'
+            }`}
+          >
+            <Menu className="w-5 h-5" />
+            <span className="whitespace-nowrap">المزيد</span>
+          </button>
+        </div>
+        <footer className="flex min-h-6 items-center justify-center border-t border-slate-200/75 px-2 dark:border-white/10">
+          <DesignerSignature />
+        </footer>
       </nav>
 
       {/* Mobile "المزيد" Bottom Sheet */}
@@ -872,7 +878,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       {toast && (
         <div
           role="status"
-          className="fixed bottom-20 lg:bottom-6 left-4 z-50 bg-slate-900 dark:bg-blue-600 text-white px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium"
+          className="fixed bottom-[calc(6.5rem+env(safe-area-inset-bottom))] lg:bottom-6 left-4 z-50 bg-slate-900 dark:bg-blue-600 text-white px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium"
         >
           {toast}
         </div>
