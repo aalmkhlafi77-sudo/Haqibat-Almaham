@@ -29,6 +29,14 @@ const lampColors = [
 
 type LampColor = typeof lampColors[number];
 
+const beamDust = [
+  [47, 12, 1.2], [55, 19, 1.6], [38, 27, 1.1], [58, 31, 2],
+  [49, 37, 1.4], [32, 42, 1.8], [68, 45, 1.3], [42, 49, 2.2],
+  [54, 54, 1.1], [62, 59, 1.8], [28, 62, 1.2], [48, 65, 1.6],
+  [76, 69, 1.4], [38, 72, 2], [57, 76, 1.1], [23, 79, 1.7],
+  [68, 84, 2.1], [45, 89, 1.3], [82, 91, 1.4], [32, 94, 1.2],
+] as const;
+
 export default function HaqibatLampLogin({
   children,
   title = 'حقيبة المهام',
@@ -99,7 +107,23 @@ export default function HaqibatLampLogin({
           <div className="haq-lamp__fixture">
             <div className="haq-lamp__shade" aria-hidden="true" />
             <div className="haq-lamp__bulb" aria-hidden="true" />
-            <div className="haq-lamp__beam" aria-hidden="true" />
+            <div className="haq-lamp__beam" aria-hidden="true">
+              {beamDust.map(([x, y, size], index) => (
+                <span
+                  key={index}
+                  className="haq-lamp__dust"
+                  style={{
+                    left: `${x}%`,
+                    top: `${y}%`,
+                    width: size,
+                    height: size,
+                    '--haq-dust-drift': index % 2 === 0 ? '-9px' : '10px',
+                    animationDuration: `${6 + (index % 5) * 1.3}s`,
+                    animationDelay: `${-(index % 7) * 1.1}s`,
+                  } as CSSProperties}
+                />
+              ))}
+            </div>
             <div className="haq-lamp__stand" aria-hidden="true" />
             <div className="haq-lamp__base" aria-hidden="true" />
             <span className="haq-lamp__cord" aria-hidden="true" />
@@ -205,6 +229,22 @@ const lampStyles = `
   opacity: 0; transition: opacity 420ms ease; pointer-events: none;
 }
 .haq-lamp[data-lit="true"] .haq-lamp__beam { opacity: 1; }
+.haq-lamp__dust {
+  position: absolute; border-radius: 50%; opacity: .32;
+  background: color-mix(in srgb, var(--haq-light, #ffc96b) 40%, white);
+  box-shadow: 0 0 3px var(--haq-light, #ffc96b);
+}
+.haq-lamp[data-lit="true"] .haq-lamp__dust {
+  animation-name: haq-lamp-dust-drift;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+@keyframes haq-lamp-dust-drift {
+  0% { transform: translate(0, 5px); opacity: .16; }
+  55% { opacity: .55; }
+  100% { transform: translate(var(--haq-dust-drift), -12px); opacity: .12; }
+}
 .haq-lamp__stand {
   position: absolute; top: 66px; left: 112px; width: 6px; height: 141px;
   background: linear-gradient(90deg, #18191e, #5b5755, #222329);
@@ -258,5 +298,6 @@ const lampStyles = `
   .haq-lamp :is(.haq-lamp__ambient, .haq-lamp__beam, .haq-lamp__bulb,
   .haq-lamp__cord, .haq-lamp__pull, .haq-lamp__form) { transition: none; }
   .haq-lamp__form { transform: none; }
+  .haq-lamp[data-lit="true"] .haq-lamp__dust { animation-name: none; }
 }
 `;
