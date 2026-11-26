@@ -1,4 +1,7 @@
-import { tsImport } from 'tsx/esm/api';
-
-const { runServer } = await tsImport('./server.ts', import.meta.url);
-await runServer();
+import('tsx/esm/api')
+  .then(({ tsImport }) => tsImport('./server.ts', import.meta.url))
+  .then(({ runServer }) => runServer())
+  .catch((error) => {
+    console.error('Failed to load the server:', error.code || error.message);
+    process.exit(1);
+  });
