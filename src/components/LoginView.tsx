@@ -1,4 +1,3 @@
-import { HaqibatMark } from './HaqibatBrand';
 import React, { useId, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -65,7 +64,8 @@ function LoginField({ label, value, onChange, autoComplete, required, minLength 
   const Icon = isPassword ? Lock : User;
 
   return (
-    <div className="haq-login-field" data-filled={Boolean(value)}>
+    <div className="haq-login-field">
+      <label htmlFor={id}>{label}</label>
       <input
         id={id}
         type={isPassword && !visible ? 'password' : 'text'}
@@ -76,7 +76,6 @@ function LoginField({ label, value, onChange, autoComplete, required, minLength 
         required={required}
         minLength={minLength}
       />
-      <label htmlFor={id}>{label}</label>
       <div className="haq-login-field-icons">
         <Icon size={18} aria-hidden="true" />
         {isPassword && (
@@ -163,29 +162,6 @@ export function LoginView({ onLaunchChange }: { onLaunchChange: (active: boolean
   return (
     <div className="w-full min-w-0">
       <div className="w-full max-w-2xl space-y-4">
-        {/* Top Bar with Theme Switch */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <HaqibatMark />
-            <div>
-              <h2 className="text-lg font-bold text-[#fff0d8]">حقيبة المهام</h2>
-              <p className="text-xs text-[#ded0bb]">
-                متابعة المهام والوثائق والجلسات وضريبة القيمة المضافة 3A
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={toggleTheme}
-            title={isDark ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع السينمائي'}
-            aria-label={isDark ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع السينمائي'}
-            className="h-10 w-10 flex items-center justify-center rounded-xl border border-slate-200 dark:border-white/15 bg-white dark:bg-[#14161b] text-slate-700 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-white/10"
-          >
-            {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
-          </button>
-        </div>
-
         {/* Pending Deep-Link Indicator */}
         {pendingDeepLink && (
           <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/90 dark:bg-blue-950/50 px-4 py-3 text-xs text-blue-900 dark:text-blue-200 flex items-center gap-2">
@@ -199,6 +175,18 @@ export function LoginView({ onLaunchChange }: { onLaunchChange: (active: boolean
         <style>{loginStyles}</style>
         {/* Auth Card */}
         <div className="haq-login-neon rounded-2xl p-5 sm:p-6 space-y-5">
+          <header className="flex items-center justify-between gap-3">
+            <h2 className="text-xl font-bold text-[#fff0d8]">تسجيل الدخول</h2>
+          <button
+            type="button"
+            onClick={toggleTheme}
+            title={isDark ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع السينمائي'}
+            aria-label={isDark ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع السينمائي'}
+            className="h-10 w-10 flex items-center justify-center rounded-xl border border-slate-200 dark:border-white/15 bg-white dark:bg-[#14161b] text-slate-700 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-white/10"
+          >
+            {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
+          </button>
+          </header>
           {/* Mode Tabs */}
           {!serverAuthStatus.shared && <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-1 rounded-xl bg-slate-100 dark:bg-[#14161b] border border-slate-200 dark:border-white/10">
             <button
@@ -329,10 +317,6 @@ export function LoginView({ onLaunchChange }: { onLaunchChange: (active: boolean
                 </form>
               ) : (
                 <form onSubmit={handleServerSubmit} className="space-y-3.5">
-                  <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/35 px-3.5 py-2.5 text-xs text-emerald-900 dark:text-emerald-200">
-                    متصل بالخادم الفعلي — يتم التحقق من كلمة المرور والصلاحيات على الخادم عبر جلسة محمية (<code className="font-mono-tabular">HttpOnly Cookie</code>).
-                  </div>
-
                   <LoginField label="اسم المستخدم" value={username} onChange={setUsername} autoComplete="username" required />
 
                   <LoginField label="كلمة المرور" value={password} onChange={setPassword} autoComplete="current-password" required />
@@ -379,33 +363,33 @@ const loginStyles = `
 @keyframes haq-neon-pulse { 50% { opacity: .55; } }
 .haq-login-field {
   position: relative;
-  margin-block: .55rem;
-  border-bottom: 1px solid rgb(255 255 255 / .45);
-}
-.haq-login-field:focus-within { border-color: var(--neon-accent); }
-.haq-login-field input {
-  width: 100%;
-  min-height: 46px;
-  padding: 8px 4px 4px 74px;
-  border: 0;
-  outline: 0;
-  color: white;
-  background: transparent;
 }
 .haq-login-field label {
-  position: absolute;
-  right: 4px;
-  top: 12px;
-  color: #f1f5f9;
-  pointer-events: none;
-  transition: top .2s, font-size .2s, color .2s;
+  display: block;
+  margin-block-end: .45rem;
+  color: #e8edf5;
+  font-size: .875rem;
+  font-weight: 600;
 }
-.haq-login-field:focus-within label,
-.haq-login-field[data-filled="true"] label,
-.haq-login-field:has(input:autofill) label {
-  top: -12px;
-  font-size: .75rem;
-  color: var(--neon-accent);
+.haq-login-field:focus-within label { color: var(--neon-accent); }
+.haq-login-field input {
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 12px 8px 72px;
+  border: 1px solid #657385;
+  border-radius: 10px;
+  color: #f8fafc;
+  background: #182231;
+  color-scheme: dark;
+}
+.haq-login-field input:focus {
+  outline: 2px solid var(--neon-accent);
+  outline-offset: 2px;
+}
+.haq-login-field input:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 100px #182231 inset;
+  -webkit-text-fill-color: #f8fafc;
+  caret-color: #f8fafc;
 }
 .haq-login-field-icons {
   display: flex;
@@ -413,8 +397,9 @@ const loginStyles = `
   gap: 2px;
   position: absolute;
   left: 4px;
-  top: 6px;
-  color: #dbeafe;
+  bottom: 8px;
+  height: 32px;
+  color: #b9ddf2;
 }
 .haq-login-field-icons button { padding: 6px; border-radius: 6px; }
 .haq-launch {
@@ -490,7 +475,7 @@ const loginStyles = `
 @media (prefers-reduced-motion: reduce) {
   .haq-login-neon::before, .haq-launch-progress,
   .haq-launch--complete .haq-launch-shockwave { animation: none; }
-  .haq-launch, .haq-login-field label { transition: none; }
+  .haq-launch { transition: none; }
   .haq-launch:not(:disabled):hover, .haq-launch:disabled { transform: none; }
 }
 `;
