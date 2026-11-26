@@ -1,4 +1,6 @@
 import { answerAssistant, assistantConnection, assistantQuestion, verifyGeminiConnection } from './server/geminiAssistant';
+import { applyAssistantImport, draftAssistantImport, unpackImport } from './server/assistantImport';
+import { IMPORT_MAX_BYTES, IMPORT_MAX_METADATA_BYTES } from './src/domain/assistantImport';
 import 'dotenv/config';
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -335,6 +337,38 @@ export function createServerApp(store: WorkspaceStore = createPreviewStore()) {
       canEditVat: hasPermission(user, 'vat3a:edit'),
       canViewReports: hasPermission(user, 'reports:view'),
     }));
+  }));
+
+  const importAccess = [requireAuth, requirePermission('records:read'), requirePermission('records:write')];
+  const attachmentBody = express.raw({
+    type: 'application/octet-stream',
+    limit: IMPORT_MAX_BYTES + IMPORT_MAX_METADATA_BYTES + 4,
+    inflate: false,
+  });
+
+  app.post('/api/ai/import/preview', ...importAccess, aiRateLimit, attachmentBody, asyncRoute(async (req, res) => {
+    const controller = new AbortController();
+    const onClose = () => controller.abort();
+    res.once('close', onClose);
+    try {
+      const input = unpackImport(req.body);
+      const workspace = await store.read();
+      if (workspace.state.preferences.integrations.aiProvider !== 'server_gemini') {
+        throw new RequestError(409, 'اختر Google Gemini من إعدادات المساعد.');
+      }
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]);
+      const draft = await draftAssistantImport(input, workspace, signal);
+      if (!controller.signal.aborted) res.json(draft);
+    } finally {
+      if (Buffer.isBuffer(req.body)) req.body.fill(0);
+      res.off('close', onClose);
+    }
+  }));
+
+  app.post('/api/ai/import/commit', ...importAccess, asyncRoute(async (req, res) => {
+    let result: ReturnType<typeof applyAssistantImport> | undefined;
+    await store.change((workspace) => { result = applyAssistantImport(workspace, req.body); });
+    res.json(result);
   }));
 
   app.get('/api/auth/status', asyncRoute(async (req, res) => {
