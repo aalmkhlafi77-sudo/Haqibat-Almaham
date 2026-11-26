@@ -1,3 +1,4 @@
+import { answerAssistant, assistantConnection, assistantQuestion, verifyGeminiConnection } from './server/geminiAssistant';
 import 'dotenv/config';
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -296,6 +297,32 @@ export function createServerApp(store: WorkspaceStore = createPreviewStore()) {
         : 'مفتاح GEMINI_API_KEY غير مضبوط في بيئة الخادم.',
     });
   });
+
+  const aiRateLimit = rateLimit({
+    windowMs: 60_000,
+    limit: 10,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    message: { error: 'تكررت طلبات المساعد. حاول مجددًا بعد دقيقة.' },
+  });
+
+  app.post('/api/ai/connection', requireAuth, requirePermission('settings:manage'), aiRateLimit, asyncRoute(async (req, res) => {
+    const input = assistantConnection.safeParse(req.body);
+    if (!input.success) throw new RequestError(400, 'معرّف النموذج غير صالح.');
+    const model = await verifyGeminiConnection(input.data.model);
+    res.json({ ok: true, model });
+  }));
+
+  app.post('/api/ai/ask', requireAuth, requirePermission('records:read'), aiRateLimit, asyncRoute(async (req, res) => {
+    const input = assistantQuestion.safeParse(req.body);
+    if (!input.success) throw new RequestError(400, 'اكتب سؤالًا من حرفين إلى 600 حرف.');
+    const user = (req as Request & { authUser: AuthUser }).authUser;
+    const workspace = publicWorkspace(await store.read(), user);
+    if (workspace.state.preferences.integrations.aiProvider !== 'server_gemini') {
+      throw new RequestError(409, 'اختر Google Gemini من إعدادات المساعد.');
+    }
+    res.json(await answerAssistant(input.data.question, workspace.state, hasPermission(user, 'records:write')));
+  }));
 
   app.get('/api/auth/status', asyncRoute(async (req, res) => {
     const user = await resolveUserFromRequest(req);

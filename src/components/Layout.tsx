@@ -1,3 +1,4 @@
+import { AssistantPanel } from './AssistantPanel';
 import React, { useMemo, useState } from 'react';
 import {
   BarChart3,
@@ -615,6 +616,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
           {/* Header Actions (User + Theme Switch + Notifications Bell on Left Side in RTL) */}
           <div className="flex items-center gap-2 shrink-0">
+            {currentUser?.authMode === 'server' && <AssistantPanel />}
             {currentUser && (
               <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-slate-200 dark:border-white/10">
                 <div className="text-right leading-tight max-w-[165px]">

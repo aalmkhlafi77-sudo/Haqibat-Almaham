@@ -26,6 +26,7 @@ import {
   X,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { effectiveGeminiModel } from '../domain/assistant';
 import { ROLE_LABELS } from '../domain/authPermissions';
 import {
   BACKUP_SCHEMA_VERSION,
@@ -119,6 +120,8 @@ export const SettingsView: React.FC = () => {
 
   const rules = db.preferences.vat3aRules;
   const integrations = db.preferences.integrations;
+  const [modelDraft, setModelDraft] = useState<string | null>(null);
+  const geminiModel = modelDraft ?? effectiveGeminiModel(integrations.aiModelName);
 
   const updateLineRule = (
     lineId: Vat3ALineId,
@@ -150,11 +153,7 @@ export const SettingsView: React.FC = () => {
 
   const handleTestAi = async () => {
     setTestingAi(true);
-    await testAiConnection(
-      integrations.serverBaseUrl,
-      integrations.aiProvider,
-      integrations.aiModelName
-    );
+    await testAiConnection(geminiModel);
     setTestingAi(false);
   };
 
@@ -947,8 +946,8 @@ export const SettingsView: React.FC = () => {
               <input
                 type="url"
                 dir="ltr"
-                disabled={!canManageSettings}
-                value={integrations.serverBaseUrl}
+                disabled={!canManageSettings || authMode === 'server'}
+                value={authMode === 'server' ? window.location.origin + '/api' : integrations.serverBaseUrl}
                 onChange={(e) =>
                   updateIntegrations({
                     serverBaseUrl: e.target.value,
@@ -991,21 +990,12 @@ export const SettingsView: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
                   المزود
                 </label>
-                <select
-                  disabled={!canManageSettings}
-                  value={integrations.aiProvider}
-                  onChange={(e) =>
-                    updateIntegrations({
-                      aiProvider: e.target.value as IntegrationSettings['aiProvider'],
-                      aiStatus: 'disconnected',
-                    })
-                  }
-                  className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2.5 py-2 text-xs disabled:opacity-50"
-                >
-                  <option value="gemini">Google Gemini</option>
-                  <option value="openai">OpenAI Compatible</option>
-                  <option value="custom">مسار مخصص على الخادم</option>
-                </select>
+                <input
+                  readOnly
+                  value="Google Gemini"
+                  aria-label="مزود المساعد الذكي"
+                  className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2.5 py-2 text-xs"
+                />
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
@@ -1014,14 +1004,10 @@ export const SettingsView: React.FC = () => {
                 <input
                   type="text"
                   dir="ltr"
-                  disabled={!canManageSettings}
-                  value={integrations.aiModelName}
-                  onChange={(e) =>
-                    updateIntegrations({
-                      aiModelName: e.target.value,
-                      aiStatus: 'disconnected',
-                    })
-                  }
+                  disabled={!canManageSettings || authMode !== 'server' || testingAi}
+                  aria-label="نموذج Gemini"
+                  value={geminiModel}
+                  onChange={(e) => setModelDraft(e.target.value)}
                   className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#0e1015] px-2.5 py-2 text-xs font-mono-tabular disabled:opacity-50"
                 />
               </div>
@@ -1035,11 +1021,11 @@ export const SettingsView: React.FC = () => {
 
             <button
               type="button"
-              disabled={!canManageSettings || testingAi}
+              disabled={!canManageSettings || authMode !== 'server' || testingAi || !geminiModel.trim()}
               onClick={handleTestAi}
               className="px-3.5 py-2 rounded-lg border border-violet-300 dark:border-violet-500/40 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/40 text-xs font-semibold disabled:opacity-60"
             >
-              {testingAi ? 'جارٍ الفحص...' : 'اختبار مسار الذكاء الاصطناعي'}
+              {testingAi ? 'جارٍ الفحص...' : 'اختبار اتصال Gemini وحفظ النموذج'}
             </button>
           </div>
         </div>

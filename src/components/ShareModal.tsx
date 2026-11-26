@@ -27,7 +27,7 @@ import {
 import { ShareChannel } from '../types/domain';
 
 export const ShareModal: React.FC = () => {
-  const { db, shareTarget, closeShareModal, logShareOpened, showToast } = useApp();
+  const { db, authMode, shareTarget, closeShareModal, logShareOpened, showToast } = useApp();
   const [selectedSpecialistId, setSelectedSpecialistId] = useState<string>('');
   const [channel, setChannel] = useState<ShareChannel>('whatsapp');
   const [reportFormat, setReportFormat] = useState<'pdf' | 'excel'>('pdf');
@@ -38,7 +38,7 @@ export const ShareModal: React.FC = () => {
     if (!shareTarget) return;
     const initialSpecId = shareTarget.specialistId || '';
     setSelectedSpecialistId(initialSpecId);
-    setChannel('whatsapp');
+    setChannel(shareTarget.channel ?? 'whatsapp');
 
     if (shareTarget.recordType === 'vat_3a' || shareTarget.recordType === 'report') {
       setReportFormat('pdf');
@@ -46,12 +46,13 @@ export const ShareModal: React.FC = () => {
       return;
     }
 
-    const { url } = buildRecordDeepLink(shareTarget.recordType, shareTarget.recordId);
+    const linkedType = shareTarget.recordType === 'document_renewal' ? 'document' : shareTarget.recordType;
+    const { url } = buildRecordDeepLink(linkedType, shareTarget.recordId);
     const baseMsg = url
-      ? `${shareTarget.defaultMessage}\n\nرابط السجل في المعاينة:\n${url}`
+      ? `${shareTarget.defaultMessage}\n\n${authMode === 'server' ? 'رابط السجل' : 'رابط السجل في المعاينة'}:\n${url}`
       : shareTarget.defaultMessage;
     setMessageText(baseMsg);
-  }, [shareTarget]);
+  }, [shareTarget, authMode]);
 
   if (!shareTarget) return null;
 

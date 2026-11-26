@@ -10,6 +10,7 @@ import {
   saveLastBackupMeta,
   setDemoSessionProfileId,
 } from '../data/repository';
+import { effectiveGeminiModel } from '../domain/assistant';
 import { createEmptyDatabase } from '../data/seedData';
 import {
   fetchWorkspace, loadPersonalPreferences, personalPreferences, savePersonalPreferences,
@@ -72,6 +73,7 @@ export interface ShareTargetPayload {
   specialistId: string | null;
   scheduledInfo: string;
   defaultMessage: string;
+  channel?: Extract<ShareChannel, 'email' | 'whatsapp'>;
   vatDraft?: Vat3ADraft;
   reportSnapshot?: ReportExportSnapshot;
 }
@@ -107,7 +109,7 @@ interface AppContextValue {
   setVat3ARules: (rules: Vat3ARulesConfig) => void;
   updateIntegrations: (partial: Partial<IntegrationSettings>) => void;
   testServerConnection: (baseUrl: string) => Promise<void>;
-  testAiConnection: (baseUrl: string, provider: IntegrationSettings['aiProvider'], modelName: string) => Promise<void>;
+  testAiConnection: (modelName: string) => Promise<void>;
   toggleSectionCollapsed: (key: string) => void;
   setSectionsCollapsed: (keys: string[], collapsed: boolean) => void;
   toggleNavGroupCollapsed: (key: string) => void;
@@ -518,7 +520,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const testServerConnection = async (baseUrl: string) => {
-    const clean = baseUrl.trim().replace(/\/+$/, '');
+    const clean = useServerState ? '/api' : baseUrl.trim().replace(/\/+$/, '');
     const checkedAt = new Date().toISOString().slice(0, 19);
     if (!clean) {
       updateIntegrations({
@@ -537,9 +539,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         signal: controller.signal,
       });
       window.clearTimeout(timer);
-      if (res.ok) {
+      const healthy = res.ok && (!useServerState || (await res.json()).ok === true);
+      if (healthy) {
         updateIntegrations({
-          serverBaseUrl: clean,
+          serverBaseUrl: useServerState ? window.location.origin + '/api' : clean,
           serverStatus: 'connected',
           serverLastCheckedAt: checkedAt,
           serverStatusMessage: `متصل (${res.status})`,
@@ -547,7 +550,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         showToast('تم الاتصال بالخادم بنجاح.');
       } else {
         updateIntegrations({
-          serverBaseUrl: clean,
+          serverBaseUrl: useServerState ? window.location.origin + '/api' : clean,
           serverStatus: 'error',
           serverLastCheckedAt: checkedAt,
           serverStatusMessage: `تعذّر الاتصال (HTTP ${res.status}) — يعمل النظام محليًا.`,
@@ -563,56 +566,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const testAiConnection = async (
-    baseUrl: string,
-    provider: IntegrationSettings['aiProvider'],
-    modelName: string
-  ) => {
-    const clean = baseUrl.trim().replace(/\/+$/, '');
+  const testAiConnection = async (modelName: string) => {
+    const model = effectiveGeminiModel(modelName);
     const checkedAt = new Date().toISOString().slice(0, 19);
-    if (!clean) {
-      updateIntegrations({
-        aiProvider: provider,
-        aiModelName: modelName,
-        aiStatus: 'disconnected',
-        aiLastCheckedAt: checkedAt,
-        aiStatusMessage: 'غير متصل — يتطلب ربط عنوان الخادم أولًا لإدارة المفاتيح على الخادم.',
-      });
-      return;
-    }
     try {
-      const controller = new AbortController();
-      const timer = window.setTimeout(() => controller.abort(), 4000);
-      const res = await fetch(`${clean}/ai/status?provider=${encodeURIComponent(provider)}&model=${encodeURIComponent(modelName)}`, {
-        method: 'GET',
-        signal: controller.signal,
+      const response = await fetch('/api/ai/connection', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ model }),
+        signal: AbortSignal.timeout(25_000),
       });
-      window.clearTimeout(timer);
-      if (res.ok) {
-        updateIntegrations({
-          aiProvider: provider,
-          aiModelName: modelName,
-          aiStatus: 'connected',
-          aiLastCheckedAt: checkedAt,
-          aiStatusMessage: `متصل عبر الخادم (${modelName})`,
-        });
-        showToast('تكامل الذكاء الاصطناعي متصل.');
-      } else {
-        updateIntegrations({
-          aiProvider: provider,
-          aiModelName: modelName,
-          aiStatus: 'error',
-          aiLastCheckedAt: checkedAt,
-          aiStatusMessage: `غير متصل (HTTP ${res.status})`,
-        });
+      const result = await response.json() as { ok?: boolean; model?: string; error?: string };
+      if (!response.ok || !result.ok || !result.model) {
+        throw new Error(result.error || 'تعذّر التحقق من اتصال Gemini.');
       }
-    } catch {
       updateIntegrations({
-        aiProvider: provider,
-        aiModelName: modelName,
-        aiStatus: 'disconnected',
+        aiProvider: 'server_gemini',
+        aiModelName: result.model,
+        aiStatus: 'connected',
         aiLastCheckedAt: checkedAt,
-        aiStatusMessage: 'غير متصل — تعذّر الوصول إلى مسار الذكاء الاصطناعي على الخادم.',
+        aiStatusMessage: `نجح اختبار Gemini (${result.model}).`,
+      });
+      showToast('نجح اختبار Gemini.');
+    } catch (error) {
+      updateIntegrations({
+        aiStatus: 'error',
+        aiLastCheckedAt: checkedAt,
+        aiStatusMessage: error instanceof Error && error.name === 'Error'
+          ? error.message : 'تعذّر الاتصال بخادم المساعد.',
       });
     }
   };
