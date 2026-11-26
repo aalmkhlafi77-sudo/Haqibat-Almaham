@@ -1,19 +1,23 @@
 import { Bot, Send, Share2, X } from 'lucide-react';
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { useApp } from '../context/AppContext';
-import type { AssistantAnswer, AssistantDraft, AssistantRecord } from '../domain/assistant';
+import type { AssistantAnswer, AssistantDraft, AssistantMode, AssistantRecord } from '../domain/assistant';
 import { formatDateTime, formatDisplayDate } from '../domain/dateUtils';
 
-const examples = [
-  'ما الوثائق التي ستنتهي خلال 15 يومًا؟',
-  'ما المهام المتأخرة ومن المختص بها؟',
-  'لخّص مواعيد هذا الأسبوع',
-];
+const actions = [
+  { mode: 'auto', label: 'اسأل المساعد', hint: 'ما المهام المتأخرة ومن المختص بها؟', submit: 'إرسال الطلب' },
+  { mode: 'create_task', label: 'إضافة مهمة', hint: 'متابعة تجديد الرخصة غدًا لدى البلدية، وإسنادها إلى اسم المختص', submit: 'تجهيز المهمة' },
+  { mode: 'create_event', label: 'إضافة حدث', hint: 'اجتماع مراجعة العقود يوم الأحد الساعة 11 صباحًا', submit: 'تجهيز الحدث' },
+  { mode: 'create_reminder', label: 'إضافة تذكير', hint: 'مراجعة الرخصة غدًا الساعة 10 صباحًا', submit: 'تجهيز التذكير' },
+  { mode: 'share', label: 'مشاركة مع مختص', hint: 'شارك مهمة تجديد الرخصة مع اسم المختص عبر البريد', submit: 'البحث عن السجل للمشاركة' },
+] as const;
 
 export function AssistantPanel() {
-  const { db, openRecord, openShareModal } = useApp();
+  const { db, hasPerm, openRecord, openShareModal } = useApp();
   const dialog = useRef<HTMLDialogElement>(null);
   const headingId = useId();
+  const [mode, setMode] = useState<AssistantMode>('auto');
+  const action = actions.find((item) => item.mode === mode) ?? actions[0];
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState<AssistantAnswer | null>(null);
   const [error, setError] = useState('');
@@ -30,7 +34,7 @@ export function AssistantPanel() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-        body: JSON.stringify({ question: text }),
+        body: JSON.stringify({ question: text, mode }),
         signal: AbortSignal.timeout(25_000),
       });
       const result = await response.json() as AssistantAnswer & { error?: string };
@@ -81,6 +85,13 @@ export function AssistantPanel() {
     });
   }
 
+  function chooseMode(next: AssistantMode) {
+    setMode(next);
+    setAnswer(null);
+    setError('');
+    dialog.current?.querySelector('textarea')?.focus();
+  }
+
   function submit(event: FormEvent) {
     event.preventDefault();
     void ask(question);
@@ -115,11 +126,14 @@ export function AssistantPanel() {
             <button type="button" aria-label="إغلاق المساعد" className="rounded-lg p-2 hover:bg-slate-100 dark:hover:bg-white/10" onClick={() => dialog.current?.close()}><X size={18} /></button>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            {examples.map((example) => (
-              <button key={example} type="button" disabled={pending} onClick={() => void ask(example)}
-                className="rounded-full border border-slate-200 px-3 py-1.5 text-xs hover:bg-violet-50 disabled:opacity-50 dark:border-white/15 dark:hover:bg-violet-500/15">
-                {example}
+          <div role="group" aria-label="إجراءات المساعد" className="flex flex-wrap gap-2">
+            {actions.filter(({ mode }) => !mode.startsWith('create_') || hasPerm('records:write')).map(({ mode: item, label }) => (
+              <button key={item} type="button" aria-pressed={mode === item} disabled={pending}
+                onClick={() => chooseMode(item)}
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${mode === item
+                  ? 'border-violet-600 bg-violet-100 text-violet-950 dark:border-violet-400 dark:bg-violet-500/20 dark:text-violet-100'
+                  : 'border-slate-200 hover:bg-violet-50 dark:border-white/15 dark:hover:bg-violet-500/15'}`}>
+                {label}
               </button>
             ))}
           </div>
@@ -129,10 +143,10 @@ export function AssistantPanel() {
             <textarea id={`${headingId}-question`} value={question} onChange={(event) => setQuestion(event.target.value)}
               rows={3} maxLength={600} disabled={pending}
               className="w-full resize-y rounded-xl border border-slate-300 bg-transparent p-3 text-sm focus-visible:ring-2 focus-visible:ring-violet-500 dark:border-white/20"
-              placeholder="مثال: جهّز تذكيرًا لمراجعة الرخصة غدًا الساعة 10 صباحًا" />
+              placeholder={`مثال: ${action.hint}`} />
             <button type="submit" disabled={pending || question.trim().length < 2}
               className="inline-flex items-center gap-2 rounded-xl bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-800 disabled:opacity-50">
-              <Send size={15} aria-hidden="true" /> إرسال الطلب
+              <Send size={15} aria-hidden="true" /> {action.submit}
             </button>
           </form>
 
@@ -142,10 +156,13 @@ export function AssistantPanel() {
             <section aria-live="polite" className="space-y-3 border-t border-slate-200 pt-4 dark:border-white/15">
               <p className="text-sm leading-relaxed">{answer.message}</p>
               {answer.draft && (
-                <button type="button" onClick={() => { if (answer.draft) openDraft(answer.draft); }}
-                  className="rounded-lg border border-violet-300 px-3 py-2 text-sm font-semibold text-violet-700 dark:text-violet-200">
-                  مراجعة المسودة
-                </button>
+                <div className="space-y-2 rounded-xl border border-violet-200 bg-violet-50 p-3 dark:border-violet-500/30 dark:bg-violet-500/10">
+                  <p className="break-words text-sm font-semibold">{answer.draft.title}</p>
+                  <button type="button" onClick={() => { if (answer.draft) openDraft(answer.draft); }}
+                    className="rounded-lg bg-violet-700 px-3 py-2 text-sm font-semibold text-white hover:bg-violet-800">
+                    فتح النموذج للحفظ
+                  </button>
+                </div>
               )}
               {answer.records.length > 0 && (
                 <ul className="space-y-2">

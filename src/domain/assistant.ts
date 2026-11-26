@@ -7,6 +7,9 @@ export function effectiveGeminiModel(model: string) {
   return !value || value === 'gemini-2.5-flash' ? DEFAULT_GEMINI_MODEL : value;
 }
 
+export const ASSISTANT_MODES = ['auto', 'create_task', 'create_event', 'create_reminder', 'share'] as const;
+export type AssistantMode = (typeof ASSISTANT_MODES)[number];
+
 export type AssistantRecord = {
   type: Extract<RecordType, 'task' | 'document' | 'session' | 'calendar_item'>;
   id: string;
