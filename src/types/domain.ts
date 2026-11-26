@@ -193,6 +193,9 @@ export interface LabelItem {
   textColor: string;
   posX?: number | null;
   posY?: number | null;
+  desktopPosX?: number | null;
+  desktopPosY?: number | null;
+  pinnedToWorkspace?: boolean;
   attentionPulse?: boolean;
   createdAt: string;
   updatedAt: string;

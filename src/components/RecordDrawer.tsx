@@ -38,7 +38,7 @@ import {
   TaskStatus,
 } from '../types/domain';
 import { ArabicDatePicker } from './ArabicDatePicker';
-import { LabelsSection } from './LabelsSection';
+import { LabelsSection, WorkspacePinnedLabels } from './LabelsSection';
 import { StatusBadge } from './StatusBadge';
 
 export const RecordDrawer: React.FC = () => {
@@ -581,7 +581,21 @@ export const RecordDrawer: React.FC = () => {
         </div>
 
         {/* Scrollable Form Body */}
-        <form id="record-drawer-form" onSubmit={handleSave} className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-5">
+        <form
+          id="record-drawer-form"
+          data-label-workspace={`record-${activeRecord.type}-${activeRecord.id || 'new'}`}
+          onSubmit={handleSave}
+          className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-5 relative min-h-[400px]"
+        >
+          {activeRecord.id &&
+            (activeRecord.type === 'task' ||
+              activeRecord.type === 'document' ||
+              activeRecord.type === 'case') && (
+              <WorkspacePinnedLabels
+                targetType={activeRecord.type}
+                targetId={activeRecord.id}
+              />
+            )}
           {validationError && (
             <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-sm font-medium">
               {validationError}
@@ -1829,7 +1843,7 @@ export const RecordDrawer: React.FC = () => {
         </form>
 
         {/* Footer Actions */}
-        <div className="px-4 lg:px-6 py-3.5 border-t border-slate-200 dark:border-white/10 flex flex-wrap items-center justify-between gap-2 shrink-0 bg-slate-50/70 dark:bg-[#0a0b0f]/90">
+        <div className="px-4 lg:px-6 py-3.5 border-t border-slate-200 dark:border-white/10 flex flex-wrap items-center justify-between gap-2 shrink-0 bg-slate-50/70 dark:bg-[#0a0b0f]/90 relative z-30">
           <div className="flex items-center gap-2">
             {activeRecord.id && canDeleteRecords && (
               <button

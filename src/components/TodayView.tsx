@@ -25,7 +25,7 @@ import {
   getUrgentAlertMotionClass,
 } from '../domain/dateUtils';
 import { CollapsibleSection } from './CollapsibleSection';
-import { LabelsSection } from './LabelsSection';
+import { LabelsSection, WorkspacePinnedLabels } from './LabelsSection';
 import { StatusBadge } from './StatusBadge';
 
 const TODAY_SECTION_KEYS = [
@@ -96,7 +96,8 @@ export const TodayView: React.FC = () => {
   );
 
   return (
-    <div className="space-y-4">
+    <div data-label-workspace="today" className="space-y-4 relative min-h-[500px]">
+      <WorkspacePinnedLabels targetType="today" targetId={null} />
       {/* Compact Workspace Action Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
