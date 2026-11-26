@@ -121,14 +121,14 @@ export const RecordDrawer: React.FC = () => {
           typeId: prefillType?.id || 'ttype-admin',
           type: prefillType?.name || (prefill.type as string) || 'إدارية',
           title: (prefill.title as string) || '',
-          specialistId: (prefill.specialistId as string | null) ?? db.preferences.currentSpecialistId,
+          specialistId: prefill.specialistId === null ? null : (prefill.specialistId as string | undefined) ?? db.preferences.currentSpecialistId,
           departmentName: (prefill.departmentName as string) || 'الشؤون القانونية',
           priority: (prefill.priority as TaskPriority) || 'متوسطة',
           status: 'جديدة',
-          dueDate: (prefill.dueDate as string) || today,
+          dueDate: (prefill.dueDate as string | undefined) ?? today,
           actualDeliveryDate: '',
           letterNumber: '',
-          authorityName: '',
+          authorityName: typeof prefill.authorityName === 'string' ? prefill.authorityName : '',
           receivedDate: today,
           documentId: (prefill.documentId as string | null) ?? null,
           caseId: (prefill.caseId as string | null) ?? null,
@@ -221,14 +221,14 @@ export const RecordDrawer: React.FC = () => {
         existing
           ? { ...existing }
           : {
-              kind: 'تذكير',
-              title: '',
-              scheduledAt: (prefill.scheduledAt as string) || `${today}T10:00`,
-              isAllDay: false,
-              specialistId: null,
+              kind: prefill.kind === 'حدث' ? 'حدث' : 'تذكير',
+              title: typeof prefill.title === 'string' ? prefill.title : '',
+              scheduledAt: typeof prefill.scheduledAt === 'string' ? prefill.scheduledAt : `${today}T10:00`,
+              isAllDay: prefill.isAllDay === true,
+              specialistId: typeof prefill.specialistId === 'string' ? prefill.specialistId : null,
               linkedRecordType: null,
               linkedRecordId: null,
-              notes: '',
+              notes: typeof prefill.notes === 'string' ? prefill.notes : '',
               isDone: false,
             }
       );
