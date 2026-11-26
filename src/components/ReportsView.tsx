@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
   ChevronDown,
@@ -70,7 +70,7 @@ function getStatusColor(status: string, idx: number): string {
 }
 
 export const ReportsView: React.FC = () => {
-  const { db, authMode, hasPerm, openRecord, openShareModal, showToast } = useApp();
+  const { db, authMode, hasPerm, openRecord, openShareModal, showToast, assistantHandoff, setAssistantHandoff } = useApp();
   const today = getTodayISO();
   const showHijri = db.preferences.showHijri;
   const warningDays = db.preferences.documentWarningDays;
@@ -85,6 +85,17 @@ export const ReportsView: React.FC = () => {
   const [barMode, setBarMode] = useState<'specialist' | 'month'>('specialist');
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const [exportingFormat, setExportingFormat] = useState<'pdf' | 'excel' | null>(null);
+
+  useEffect(() => {
+    if (assistantHandoff?.kind !== 'report') return;
+    setFromDate(assistantHandoff.fromDate || '');
+    setToDate(assistantHandoff.toDate || '');
+    setSpecialistId(assistantHandoff.specialistId || 'الكل');
+    setDepartmentName('الكل');
+    setOperationType('الكل');
+    setStatusFilter('الكل');
+    setAssistantHandoff(null);
+  }, [assistantHandoff, setAssistantHandoff]);
 
   const getSpecialist = (id: string | null) =>
     db.specialists.find((s) => s.id === id) || null;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Mail,
   MessageCircle,
@@ -18,6 +18,8 @@ import { StatusBadge } from './StatusBadge';
 export const SpecialistsView: React.FC = () => {
   const {
     db,
+    assistantHandoff,
+    setAssistantHandoff,
     hasPerm,
     saveSpecialist,
     deleteSpecialist,
@@ -29,6 +31,17 @@ export const SpecialistsView: React.FC = () => {
   const [editing, setEditing] = useState<Partial<Specialist> | null>(null);
   const [formError, setFormError] = useState('');
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (assistantHandoff?.kind !== 'specialist') return;
+    if (assistantHandoff.prefill && canWriteRecords) {
+      setEditing({ ...assistantHandoff.prefill, isActive: true });
+      setFormError('');
+    } else if (assistantHandoff.id) {
+      document.getElementById(`specialist-${assistantHandoff.id}`)?.scrollIntoView({ block: 'center' });
+    }
+    setAssistantHandoff(null);
+  }, [assistantHandoff, canWriteRecords, setAssistantHandoff]);
 
   const startNew = () => {
     setFormError('');
@@ -195,7 +208,7 @@ export const SpecialistsView: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {db.specialists.map((sp) => (
           <div
-            key={sp.id}
+            key={sp.id} id={`specialist-${sp.id}`}
             className="glass-panel rounded-xl p-4 flex items-start justify-between gap-3"
           >
             <div className="space-y-1 min-w-0">
