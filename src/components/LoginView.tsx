@@ -29,6 +29,7 @@ function LaunchButton({ state, label }: { state: LaunchState; label: string }) {
       type="submit"
       className={`haq-launch haq-launch--${state}`}
       disabled={state !== 'idle'}
+      aria-label={state === "idle" ? label : undefined}
       aria-busy={state === 'charging'}
       onPointerMove={({ currentTarget, clientX, clientY }) => {
         const bounds = currentTarget.getBoundingClientRect();
