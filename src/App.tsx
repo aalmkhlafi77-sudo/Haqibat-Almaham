@@ -21,7 +21,7 @@ import { Vat3AView } from './components/Vat3AView';
 import { AppProvider, useApp } from './context/AppContext';
 
 const MainRouter: React.FC = () => {
-  const { db, currentUser, authLoading, hasPerm } = useApp();
+  const { db, currentUser, authLoading, hasPerm, workspaceSync, refreshWorkspace } = useApp();
   const activeNav = db.preferences.activeNav;
 
   if (authLoading) {
@@ -42,6 +42,16 @@ const MainRouter: React.FC = () => {
 
   return (
     <Layout>
+      {workspaceSync.error ? (
+        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500 p-3 text-sm">
+          <span>{workspaceSync.error} أعد تحميل السجلات قبل متابعة التعديل.</span>
+          <button type="button" className="font-semibold underline" disabled={workspaceSync.pending} onClick={() => void refreshWorkspace()}>
+            إعادة تحميل السجلات
+          </button>
+        </div>
+      ) : workspaceSync.pending && (
+        <div role="status" className="mb-3 text-xs">جارٍ الحفظ على الخادم…</div>
+      )}
       {activeNav === 'today' && <TodayView />}
       {activeNav === 'tasks' && <TasksView />}
       {activeNav === 'documents' && <DocumentsView />}

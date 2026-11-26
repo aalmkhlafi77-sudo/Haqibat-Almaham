@@ -28,7 +28,8 @@ export const LoginView: React.FC = () => {
   } = useApp();
 
   const isDark = db.preferences.theme === 'dark';
-  const [tab, setTab] = useState<'local_demo' | 'server'>('local_demo');
+  const [selectedTab, setTab] = useState<'local_demo' | 'server'>('local_demo');
+  const tab = serverAuthStatus.shared ? 'server' : selectedTab;
   const [selectedDemoId, setSelectedDemoId] = useState<string>(DEMO_ACCOUNTS[0].id);
 
   // Server login / bootstrap form state
@@ -52,7 +53,7 @@ export const LoginView: React.FC = () => {
     setErrorMsg('');
     setSubmitting(true);
     try {
-      if (!serverAuthStatus.hasAdminAccount && !serverAuthStatus.envAdminConfigured) {
+      if (!serverAuthStatus.shared && !serverAuthStatus.hasAdminAccount && !serverAuthStatus.envAdminConfigured) {
         const res = await bootstrapServerAdmin({
           username,
           displayName: displayName || 'مدير النظام',
@@ -109,7 +110,7 @@ export const LoginView: React.FC = () => {
         {/* Auth Card */}
         <div className="glass-panel rounded-2xl p-5 sm:p-6 space-y-5 shadow-xl">
           {/* Mode Tabs */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-1 rounded-xl bg-slate-100 dark:bg-[#14161b] border border-slate-200 dark:border-white/10">
+          {!serverAuthStatus.shared && <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-1 rounded-xl bg-slate-100 dark:bg-[#14161b] border border-slate-200 dark:border-white/10">
             <button
               type="button"
               onClick={() => {
@@ -141,7 +142,7 @@ export const LoginView: React.FC = () => {
               <Server className="w-4 h-4" />
               <span>الخادم المشترك (حسابات فعلية)</span>
             </button>
-          </div>
+          </div>}
 
           {errorMsg && (
             <div
@@ -209,7 +210,7 @@ export const LoginView: React.FC = () => {
               {!serverAuthStatus.reachable ? (
                 <div className="rounded-xl border border-slate-200 dark:border-white/10 p-4 space-y-3 text-center">
                   <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                    تعذّر الوصول إلى مسار الخادم (<code className="font-mono-tabular">/api/auth/status</code>). تأكد من تشغيل خادم التطبيق عبر <code className="font-mono-tabular">tsx server.ts</code> أو استخدم المعاينة المحلية.
+                    تعذّر الاتصال بخادم حقيبة المهام. أعد المحاولة بعد قليل.
                   </p>
                   <button
                     type="button"
@@ -220,7 +221,7 @@ export const LoginView: React.FC = () => {
                     <span>إعادة فحص الخادم</span>
                   </button>
                 </div>
-              ) : !serverAuthStatus.hasAdminAccount && !serverAuthStatus.envAdminConfigured ? (
+              ) : !serverAuthStatus.shared && !serverAuthStatus.hasAdminAccount && !serverAuthStatus.envAdminConfigured ? (
                 <form onSubmit={handleServerSubmit} className="space-y-3.5">
                   <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/35 px-3.5 py-2.5 text-xs text-emerald-900 dark:text-emerald-200 leading-relaxed flex items-start gap-2">
                     <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" />

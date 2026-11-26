@@ -1,6 +1,8 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import {
   dataRepository,
+  StateDataRepository,
+  type DataRepository,
   generateId,
   getDemoSessionProfileId,
   getLastBackupMeta,
@@ -8,6 +10,11 @@ import {
   saveLastBackupMeta,
   setDemoSessionProfileId,
 } from '../data/repository';
+import { createEmptyDatabase } from '../data/seedData';
+import {
+  fetchWorkspace, loadPersonalPreferences, personalPreferences, savePersonalPreferences,
+  sharedBuild, sharedSettingKeys, type SharedWorkspace,
+} from '../data/sharedWorkspace';
 import {
   buildAuthUserFromDemo,
   canAccessNav,
@@ -72,6 +79,7 @@ export interface ShareTargetPayload {
 export interface ServerAuthStatus {
   checked: boolean;
   reachable: boolean;
+  shared: boolean;
   envAdminConfigured: boolean;
   hasAdminAccount: boolean;
 }
@@ -158,6 +166,8 @@ interface AppContextValue {
   currentUser: AuthUser | null;
   authMode: AuthMode;
   authLoading: boolean;
+  workspaceSync: { pending: boolean; error: string | null };
+  refreshWorkspace: () => Promise<void>;
   serverAuthStatus: ServerAuthStatus;
   pendingDeepLink: PendingDeepLink | null;
   lastBackupMeta: LastBackupMeta | null;
@@ -184,7 +194,23 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [db, setDb] = useState<AppDatabaseState>(() => dataRepository.load());
+  const [db, updateDb] = useState<AppDatabaseState>(() => {
+    if (!sharedBuild) return dataRepository.load();
+    const state = createEmptyDatabase();
+    return { ...state, preferences: { ...state.preferences, ...loadPersonalPreferences() } };
+  });
+  const dbRef = useRef(db);
+  const workspaceRef = useRef<SharedWorkspace | null>(null);
+  const writes = useRef(Promise.resolve(true));
+  const pendingWrites = useRef(0);
+  const writeFailed = useRef(false);
+  const [workspaceSync, setWorkspaceSync] = useState<{ pending: boolean; error: string | null }>({
+    pending: false, error: null,
+  });
+  const setDb = (state: AppDatabaseState) => {
+    dbRef.current = state;
+    updateDb(state);
+  };
   const [activeRecord, setActiveRecord] = useState<ActiveRecordTarget | null>(null);
   const [shareTarget, setShareTarget] = useState<ShareTargetPayload | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -197,6 +223,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [serverAuthStatus, setServerAuthStatus] = useState<ServerAuthStatus>({
     checked: false,
     reachable: false,
+    shared: sharedBuild,
     envAdminConfigured: false,
     hasAdminAccount: false,
   });
@@ -206,10 +233,91 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     document.documentElement.classList.toggle('dark', isDark);
   }, [db.preferences.theme]);
 
+  const useServerState = currentUser?.authMode === 'server';
+  const applyWorkspace = (workspace: SharedWorkspace, personal = personalPreferences(dbRef.current.preferences)) => {
+    workspaceRef.current = workspace;
+    setDb({
+      ...workspace.state,
+      preferences: { ...workspace.state.preferences, ...personal },
+    });
+  };
+
+  const refreshWorkspace = async () => {
+    if (!workspaceRef.current || pendingWrites.current) return;
+    const previous = workspaceRef.current;
+    try {
+      const next = await fetchWorkspace();
+      if (workspaceRef.current !== previous || pendingWrites.current) return;
+      applyWorkspace(next);
+      writes.current = Promise.resolve(true);
+      writeFailed.current = false;
+      setWorkspaceSync({ pending: false, error: null });
+      setActiveRecord(null);
+    } catch {
+      setWorkspaceSync({ pending: false, error: 'تعذّر تحديث السجلات من الخادم.' });
+    }
+  };
+
+  const queueWrite = (name: string, args: unknown[]) => {
+    const workspace = workspaceRef.current;
+    if (!workspace || writeFailed.current) return;
+    pendingWrites.current += 1;
+    setWorkspaceSync({ pending: true, error: null });
+    const queued = writes.current.then(async (previousSucceeded) => {
+      if (!previousSucceeded) return false;
+      try {
+        workspaceRef.current = await fetchWorkspace({ revision: workspaceRef.current!.revision, name, args });
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'تعذر حفظ التغييرات.';
+        writeFailed.current = true;
+        setWorkspaceSync({ pending: true, error: message });
+        try {
+          workspaceRef.current = await fetchWorkspace();
+        } catch {
+          // Keep the last confirmed workspace until a manual refresh succeeds.
+        }
+        return false;
+      }
+    }).then((saved) => {
+      pendingWrites.current -= 1;
+      if (pendingWrites.current === 0) {
+        applyWorkspace(workspaceRef.current ?? workspace);
+        setWorkspaceSync((status) => ({ ...status, pending: false }));
+      }
+      return saved;
+    });
+    writes.current = queued;
+  };
+
+  const persist = <Method extends keyof DataRepository>(
+    method: Method, ...args: Parameters<DataRepository[Method]>
+  ): ReturnType<DataRepository[Method]> => {
+    let next = dbRef.current;
+    const repository = useServerState
+      ? new StateDataRepository(() => next, (state) => { next = state; })
+      : dataRepository;
+    const action = repository[method] as (...args: Parameters<DataRepository[Method]>) => ReturnType<DataRepository[Method]>;
+    const result = action.apply(repository, args);
+    if (useServerState && !writeFailed.current) {
+      if (next !== dbRef.current) queueWrite(method, args);
+      setDb(next);
+    }
+    return result;
+  };
+
+  useEffect(() => {
+    const warnIfPending = (event: BeforeUnloadEvent) => {
+      if (pendingWrites.current) event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warnIfPending);
+    return () => window.removeEventListener('beforeunload', warnIfPending);
+  }, []);
+
   const applyPendingDeepLinkAfterLogin = (user: AuthUser, link: PendingDeepLink | null) => {
     if (!link) {
-      if (!canAccessNav(user, db.preferences.activeNav)) {
-        patchPrefs({ activeNav: 'today' });
+      if (!canAccessNav(user, dbRef.current.preferences.activeNav)) {
+        patchPrefs({ activeNav: 'today' }, user.authMode === 'server');
       }
       return;
     }
@@ -224,10 +332,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } else if (link.nav) {
       if (canAccessNav(user, link.nav)) {
-        patchPrefs({ activeNav: link.nav });
+        patchPrefs({ activeNav: link.nav }, user.authMode === 'server');
         showToast('تم تسجيل الدخول والانتقال إلى القسم المطلوب.');
       } else {
-        patchPrefs({ activeNav: 'today' });
+        patchPrefs({ activeNav: 'today' }, user.authMode === 'server');
         showToast(
           `صلاحيات «${user.roleLabel}» لا تسمح بفتح القسم المطلوب؛ تم توجيهك إلى الرئيسية.`
         );
@@ -236,44 +344,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPendingDeepLink(null);
   };
 
-  const refreshServerAuthStatus = async () => {
+  const refreshServerAuthStatus = async (link: PendingDeepLink | null = pendingDeepLink) => {
+    let shared = serverAuthStatus.shared || sharedBuild;
     try {
-      const res = await fetch('/api/auth/status', {
-        method: 'GET',
-        credentials: 'include',
-      });
-      if (!res.ok) {
-        setServerAuthStatus({
-          checked: true,
-          reachable: false,
-          envAdminConfigured: false,
-          hasAdminAccount: false,
-        });
-        return;
-      }
-      const data = (await res.json()) as {
-        envAdminConfigured?: boolean;
-        hasAdminAccount?: boolean;
-        authenticated?: boolean;
-        user?: AuthUser | null;
+      const response = await fetch('/api/auth/status', { credentials: 'include', cache: 'no-store' });
+      if (!response.ok) throw new Error('The server is unavailable.');
+      const status = await response.json() as {
+        shared?: boolean; envAdminConfigured?: boolean; hasAdminAccount?: boolean; user?: AuthUser;
       };
+      shared ||= Boolean(status.shared);
       setServerAuthStatus({
-        checked: true,
-        reachable: true,
-        envAdminConfigured: Boolean(data.envAdminConfigured),
-        hasAdminAccount: Boolean(data.hasAdminAccount),
+        checked: true, reachable: true, shared,
+        envAdminConfigured: Boolean(status.envAdminConfigured), hasAdminAccount: Boolean(status.hasAdminAccount),
       });
-      if (data.authenticated && data.user) {
-        setCurrentUser(data.user);
+      if (status.user) {
+        applyWorkspace(await fetchWorkspace(), loadPersonalPreferences());
+        setCurrentUser(status.user);
+        applyPendingDeepLinkAfterLogin(status.user, link);
+        return true;
       }
     } catch {
       setServerAuthStatus({
-        checked: true,
-        reachable: false,
-        envAdminConfigured: false,
-        hasAdminAccount: false,
+        checked: true, reachable: false, shared, envAdminConfigured: false, hasAdminAccount: false,
       });
     }
+    return shared;
   };
 
   useEffect(() => {
@@ -296,44 +391,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     (async () => {
-      try {
-        const res = await fetch('/api/auth/status', {
-          method: 'GET',
-          credentials: 'include',
-        });
-        if (res.ok) {
-          const data = (await res.json()) as {
-            envAdminConfigured?: boolean;
-            hasAdminAccount?: boolean;
-            authenticated?: boolean;
-            user?: AuthUser | null;
-          };
-          setServerAuthStatus({
-            checked: true,
-            reachable: true,
-            envAdminConfigured: Boolean(data.envAdminConfigured),
-            hasAdminAccount: Boolean(data.hasAdminAccount),
-          });
-          if (data.authenticated && data.user) {
-            setCurrentUser(data.user);
-            applyPendingDeepLinkAfterLogin(data.user, initialDeepLink);
-            setAuthLoading(false);
-            return;
-          }
-        }
-      } catch {
-        setServerAuthStatus({
-          checked: true,
-          reachable: false,
-          envAdminConfigured: false,
-          hasAdminAccount: false,
-        });
-      }
-
-      // Fallback to persisted local demo session profile (non-secret ID only)
-      const savedDemoId = getDemoSessionProfileId();
-      if (savedDemoId) {
-        const matched = DEMO_ACCOUNTS.find((a) => a.id === savedDemoId);
+      const serverOnly = await refreshServerAuthStatus(initialDeepLink);
+      if (!serverOnly && !workspaceRef.current) {
+        const savedDemoId = getDemoSessionProfileId();
+        const matched = DEMO_ACCOUNTS.find((profile) => profile.id === savedDemoId);
         if (matched) {
           const demoUser = buildAuthUserFromDemo(matched);
           setCurrentUser(demoUser);
@@ -345,15 +406,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const showToast = (msg: string) => {
+  const displayToast = (msg: string) => {
     setToast(msg);
     window.setTimeout(() => {
       setToast((curr) => (curr === msg ? null : curr));
     }, 3400);
   };
 
-  const patchPrefs = (partial: Partial<AppPreferences>) => {
-    setDb(dataRepository.updatePreferences(partial));
+  const showToast = (message: string) => {
+    if (writeFailed.current) return;
+    if (pendingWrites.current) {
+      void writes.current.then((saved) => { if (saved && workspaceRef.current) displayToast(message); });
+    } else {
+      displayToast(message);
+    }
+  };
+
+  const patchPrefs = (partial: Partial<AppPreferences>, useShared = useServerState || serverAuthStatus.shared) => {
+    if (!useShared) {
+      setDb(dataRepository.updatePreferences(partial));
+      return;
+    }
+    if (writeFailed.current && (partial.vat3aRules || sharedSettingKeys.some((key) => Object.hasOwn(partial, key)))) return;
+    const next = { ...dbRef.current, preferences: { ...dbRef.current.preferences, ...partial } };
+    setDb(next);
+    savePersonalPreferences(next.preferences);
+    if (!workspaceRef.current) return;
+    if (partial.vat3aRules) queueWrite('updateVat3ARules', [partial.vat3aRules]);
+    const shared = Object.fromEntries(sharedSettingKeys.filter((key) => Object.hasOwn(partial, key)).map((key) => [key, partial[key]]));
+    if (Object.keys(shared).length) queueWrite('updateSharedSettings', [shared]);
   };
 
   const openRecord = (type: RecordType, id: string | null, prefill?: Record<string, unknown>) => {
@@ -400,12 +481,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const setShowHijri = (showHijri: boolean) => patchPrefs({ showHijri });
   const setCurrentSpecialistId = (currentSpecialistId: string) =>
     patchPrefs({ currentSpecialistId });
-  const setDocumentWarningDays = (documentWarningDays: number) =>
-    patchPrefs({ documentWarningDays });
-  const setUrgentAlertDays = (urgentAlertDays: UrgentAlertDays) =>
-    patchPrefs({ urgentAlertDays });
-  const setUrgentAlertMotion = (urgentAlertMotion: UrgentAlertMotionMode) =>
-    patchPrefs({ urgentAlertMotion });
+  const setDocumentWarningDays = (documentWarningDays: number) => {
+    if (!useServerState || hasPermission(currentUser, 'settings:manage')) {
+      patchPrefs({ documentWarningDays });
+    }
+  };
+  const setUrgentAlertDays = (urgentAlertDays: UrgentAlertDays) => {
+    if (!useServerState || hasPermission(currentUser, 'settings:manage')) {
+      patchPrefs({ urgentAlertDays });
+    }
+  };
+  const setUrgentAlertMotion = (urgentAlertMotion: UrgentAlertMotionMode) => {
+    if (!useServerState || hasPermission(currentUser, 'settings:manage')) {
+      patchPrefs({ urgentAlertMotion });
+    }
+  };
   const setVat3ARules = (vat3aRules: Vat3ARulesConfig) => {
     if (!hasPermission(currentUser, 'vat3a:edit')) {
       showToast('الحساب الحالي لا يملك صلاحية تعديل قواعد 3A.');
@@ -594,7 +684,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: existing?.createdAt ?? nowIso(),
       updatedAt: nowIso(),
     };
-    setDb(dataRepository.upsertDocumentCategory(item));
+    setDb(persist('upsertDocumentCategory', item));
     showToast(existing ? 'تم تحديث اسم التصنيف في جميع الوثائق.' : 'تمت إضافة التصنيف بنجاح.');
     return item;
   };
@@ -610,7 +700,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية حذف تصنيفات الوثائق.');
       return;
     }
-    setDb(dataRepository.deleteDocumentCategory(categoryId, replacementCategoryId));
+    setDb(persist('deleteDocumentCategory', categoryId, replacementCategoryId));
     showToast(
       replacementCategoryId
         ? 'تم حذف التصنيف ونقل الوثائق المرتبطة إلى التصنيف البديل.'
@@ -654,7 +744,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: existing?.createdAt ?? nowIso(),
       updatedAt: nowIso(),
     };
-    setDb(dataRepository.upsertTaskType(item));
+    setDb(persist('upsertTaskType', item));
     showToast(existing ? 'تم تحديث اسم نوع المهمة.' : 'تمت إضافة نوع المهمة.');
     return item;
   };
@@ -667,7 +757,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية حذف أنواع المهام.');
       return false;
     }
-    const res = dataRepository.deleteTaskType(typeId, replacementTypeId);
+    const res = persist('deleteTaskType', typeId, replacementTypeId);
     setDb(res.state);
     if (!res.ok) {
       showToast(res.error || 'تعذر حذف نوع المهمة.');
@@ -698,7 +788,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية تعديل المهام.');
       return existing ?? item;
     }
-    setDb(dataRepository.upsertTask(item));
+    setDb(persist('upsertTask', item));
     return item;
   };
 
@@ -707,7 +797,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية حذف المهام.');
       return;
     }
-    setDb(dataRepository.deleteTask(id));
+    setDb(persist('deleteTask', id));
     showToast('تم حذف المهمة وتحديث الروابط.');
   };
 
@@ -730,7 +820,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية تعديل الوثائق.');
       return existing ?? item;
     }
-    setDb(dataRepository.upsertDocument(item));
+    setDb(persist('upsertDocument', item));
     return item;
   };
 
@@ -742,7 +832,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية تسجيل التجديد.');
       return;
     }
-    setDb(dataRepository.recordDocumentRenewal(documentId, renewal));
+    setDb(persist('recordDocumentRenewal', documentId, renewal));
     showToast('تم تسجيل التجديد وحفظ التاريخين السابق والجديد.');
   };
 
@@ -751,7 +841,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية حذف الوثائق.');
       return false;
     }
-    const res = dataRepository.deleteDocument(id);
+    const res = persist('deleteDocument', id);
     setDb(res.state);
     if (!res.ok) {
       showToast(res.error || 'تعذر حذف الوثيقة.');
@@ -776,7 +866,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية تعديل القضايا.');
       return existing ?? item;
     }
-    setDb(dataRepository.upsertCase(item));
+    setDb(persist('upsertCase', item));
     return item;
   };
 
@@ -785,7 +875,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية حذف القضايا.');
       return;
     }
-    setDb(dataRepository.deleteCase(id));
+    setDb(persist('deleteCase', id));
     showToast('تم حذف القضية والجلسات المرتبطة وفك الروابط المتأثرة.');
   };
 
@@ -804,7 +894,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية تعديل الجلسات.');
       return existing ?? item;
     }
-    setDb(dataRepository.upsertSession(item));
+    setDb(persist('upsertSession', item));
     return item;
   };
 
@@ -813,7 +903,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية حذف الجلسات.');
       return;
     }
-    setDb(dataRepository.deleteSession(id));
+    setDb(persist('deleteSession', id));
     showToast('تم حذف الجلسة وفك الروابط المتأثرة.');
   };
 
@@ -832,7 +922,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية تعديل الوكالات.');
       return existing ?? item;
     }
-    setDb(dataRepository.upsertPoa(item));
+    setDb(persist('upsertPoa', item));
     return item;
   };
 
@@ -841,7 +931,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية حذف الوكالات.');
       return;
     }
-    setDb(dataRepository.deletePoa(id));
+    setDb(persist('deletePoa', id));
     showToast('تم حذف الوكالة/التفويض.');
   };
 
@@ -862,7 +952,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية تعديل عناصر التقويم.');
       return existing ?? item;
     }
-    setDb(dataRepository.upsertCalendarItem(item));
+    setDb(persist('upsertCalendarItem', item));
     return item;
   };
 
@@ -871,7 +961,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية حذف عناصر التقويم.');
       return;
     }
-    setDb(dataRepository.deleteCalendarItem(id));
+    setDb(persist('deleteCalendarItem', id));
     showToast('تم حذف العنصر من التقويم.');
   };
 
@@ -889,7 +979,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: existing?.createdAt ?? nowIso(),
       updatedAt: nowIso(),
     };
-    setDb(dataRepository.upsertLabel(item));
+    setDb(persist('upsertLabel', item));
   };
 
   const deleteLabel = (id: string) => {
@@ -897,7 +987,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية حذف الملصقات.');
       return;
     }
-    setDb(dataRepository.deleteLabel(id));
+    setDb(persist('deleteLabel', id));
     showToast('تم حذف الملصق.');
   };
 
@@ -916,7 +1006,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: existing?.id ?? generateId('spec'),
       orgId: existing?.orgId ?? 'org-01',
     };
-    setDb(dataRepository.upsertSpecialist(item));
+    setDb(persist('upsertSpecialist', item));
     showToast(existing ? 'تم تحديث بيانات المختص.' : 'تمت إضافة المختص بنجاح.');
   };
 
@@ -925,7 +1015,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية حذف المختصين.');
       return;
     }
-    setDb(dataRepository.deleteSpecialist(id));
+    setDb(persist('deleteSpecialist', id));
     showToast('تم حذف المختص وتحويل السجلات المرتبطة إلى غير مسندة.');
   };
 
@@ -948,7 +1038,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       status,
       openedAt: nowIso(),
     };
-    setDb(dataRepository.addShareLog(entry));
+    setDb(persist('addShareLog', entry));
     showToast(
       status === 'تمت المشاركة عبر الجهاز'
         ? 'تمت المشاركة عبر الجهاز بنجاح.'
@@ -961,7 +1051,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية حفظ أو تعديل مسودات 3A.');
       return;
     }
-    setDb(dataRepository.upsertVat3ADraft(draft));
+    setDb(persist('upsertVat3ADraft', draft));
   };
 
   const deleteVat3ADraft = (id: string) => {
@@ -969,12 +1059,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية حذف المسودات الضريبية.');
       return;
     }
-    setDb(dataRepository.deleteVat3ADraft(id));
+    setDb(persist('deleteVat3ADraft', id));
     showToast('تم حذف المسودة الضريبية.');
   };
 
   const resetDemoData = () => {
-    if (!hasPermission(currentUser, 'settings:manage')) {
+    if (useServerState || !hasPermission(currentUser, 'settings:manage')) {
       showToast('استعادة البيانات التجريبية محصورة بصلاحية المدير.');
       return;
     }
@@ -1106,6 +1196,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const hasPerm = (perm: UserPermission) => hasPermission(currentUser, perm);
 
   const loginDemoAccount = (profileId: string): { ok: boolean; error?: string } => {
+    if (serverAuthStatus.shared) return { ok: false, error: 'المعاينة المحلية منفصلة عن مساحة العمل المشتركة.' };
     const profile = DEMO_ACCOUNTS.find((a) => a.id === profileId);
     if (!profile) {
       return { ok: false, error: 'الحساب التجريبي المحدد غير موجود.' };
@@ -1140,6 +1231,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!res.ok || !data.user) {
         return { ok: false, error: data.error || 'تعذر تفعيل حساب المدير الأول.' };
       }
+      applyWorkspace(await fetchWorkspace(), loadPersonalPreferences());
       setDemoSessionProfileId(null);
       setCurrentUser(data.user);
       setServerAuthStatus((prev) => ({ ...prev, reachable: true, hasAdminAccount: true }));
@@ -1168,6 +1260,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!res.ok || !data.user) {
         return { ok: false, error: data.error || 'فشل تسجيل الدخول على الخادم.' };
       }
+      applyWorkspace(await fetchWorkspace(), loadPersonalPreferences());
       setDemoSessionProfileId(null);
       setCurrentUser(data.user);
       applyPendingDeepLinkAfterLogin(data.user, pendingDeepLink);
@@ -1179,6 +1272,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const logout = async () => {
     if (currentUser?.authMode === 'server') {
+      await writes.current;
       try {
         await fetch('/api/auth/logout', {
           method: 'POST',
@@ -1188,6 +1282,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch {
         // ignore network error on logout
       }
+    }
+    workspaceRef.current = null;
+    writes.current = Promise.resolve(true);
+    writeFailed.current = false;
+    setWorkspaceSync({ pending: false, error: null });
+    if (useServerState) {
+      const next = serverAuthStatus.shared ? createEmptyDatabase() : dataRepository.load();
+      setDb({ ...next, preferences: { ...next.preferences, ...loadPersonalPreferences() } });
     }
     setDemoSessionProfileId(null);
     setCurrentUser(null);
@@ -1204,6 +1306,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { ok: false, error: 'صلاحيات الحساب الحالي لا تسمح بتصدير النسخ الاحتياطية.' };
     }
     if (authMode === 'server') {
+      await writes.current;
       try {
         const res = await fetch('/api/backups/export', {
           method: 'GET',
@@ -1249,6 +1352,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     if (authMode === 'server') {
+      await writes.current;
       try {
         const res = await fetch('/api/backups/restore', {
           method: 'POST',
@@ -1266,6 +1370,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             error: data.error || 'فشل الخادم في التحقق من النسخة الاحتياطية أو استعادتها.',
           };
         }
+        await refreshWorkspace();
         showToast('تمت استعادة النسخة الاحتياطية على الخادم بعد التحقق من سلامتها.');
         return { ok: true };
       } catch {
@@ -1350,7 +1455,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         pendingDeepLink,
         lastBackupMeta,
         hasPerm,
-        refreshServerAuthStatus,
+        refreshServerAuthStatus: async () => { await refreshServerAuthStatus(); },
+        workspaceSync,
+        refreshWorkspace,
         loginDemoAccount,
         bootstrapServerAdmin,
         loginServerAccount,
