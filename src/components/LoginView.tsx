@@ -1,10 +1,15 @@
 import { HaqibatMark } from './HaqibatBrand';
-import React, { useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
-  KeyRound,
-  LogIn,
+  Activity,
+  Check,
+  Eye,
+  EyeOff,
+  Lock,
+  User,
+  Zap,
   Moon,
   RefreshCw,
   Server,
@@ -15,7 +20,77 @@ import {
 import { useApp } from '../context/AppContext';
 import { DEMO_ACCOUNTS } from '../domain/authPermissions';
 
-export const LoginView: React.FC = () => {
+
+type LaunchState = 'idle' | 'charging' | 'complete';
+
+function LaunchButton({ state, label }: { state: LaunchState; label: string }) {
+  return (
+    <button
+      type="submit"
+      className={`haq-launch haq-launch--${state}`}
+      disabled={state !== 'idle'}
+      aria-label={state === "idle" ? label : undefined}
+      aria-busy={state === 'charging'}
+      onPointerMove={({ currentTarget, clientX, clientY }) => {
+        const bounds = currentTarget.getBoundingClientRect();
+        currentTarget.style.setProperty('--bx', `${100 * (clientX - bounds.left) / bounds.width}%`);
+        currentTarget.style.setProperty('--by', `${100 * (clientY - bounds.top) / bounds.height}%`);
+      }}
+    >
+      {state === 'charging' && <span className="haq-launch-progress" aria-hidden="true" />}
+      <span className="haq-launch-shockwave" aria-hidden="true" />
+      <span className="relative flex items-center justify-center gap-2" role="status">
+        {state === 'complete' ? <Check size={18} aria-hidden="true" /> :
+          state === 'charging' ? <Activity size={18} aria-hidden="true" /> :
+          <Zap size={18} aria-hidden="true" />}
+        {state === 'complete' ? 'تم تسجيل الدخول' : state === 'charging' ? 'جارٍ التحقق…' : label}
+      </span>
+    </button>
+  );
+}
+
+interface LoginFieldProps {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  autoComplete: 'username' | 'name' | 'current-password' | 'new-password';
+  required?: boolean;
+  minLength?: number;
+}
+
+function LoginField({ label, value, onChange, autoComplete, required, minLength }: LoginFieldProps) {
+  const id = useId();
+  const isPassword = autoComplete.endsWith('password');
+  const [visible, setVisible] = useState(false);
+  const Icon = isPassword ? Lock : User;
+
+  return (
+    <div className="haq-login-field" data-filled={Boolean(value)}>
+      <input
+        id={id}
+        type={isPassword && !visible ? 'password' : 'text'}
+        autoComplete={autoComplete}
+        dir={autoComplete === 'name' ? 'auto' : 'ltr'}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required={required}
+        minLength={minLength}
+      />
+      <label htmlFor={id}>{label}</label>
+      <div className="haq-login-field-icons">
+        <Icon size={18} aria-hidden="true" />
+        {isPassword && (
+          <button type="button" onClick={() => setVisible(!visible)}
+            aria-label={visible ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}>
+            {visible ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function LoginView({ onLaunchChange }: { onLaunchChange: (active: boolean) => void }) {
   const {
     db,
     toggleTheme,
@@ -36,41 +111,57 @@ export const LoginView: React.FC = () => {
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [launchState, setLaunchState] = useState<LaunchState>('idle');
+  const submitting = useRef(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  const handleDemoSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  async function submitLogin(
+    event: React.FormEvent,
+    authenticate: () => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>,
+    fallbackError: string,
+  ) {
+    event.preventDefault();
+    if (submitting.current) return;
+    submitting.current = true;
     setErrorMsg('');
-    const res = loginDemoAccount(selectedDemoId);
-    if (!res.ok) {
-      setErrorMsg(res.error || 'تعذر تسجيل الدخول التجريبي.');
-    }
-  };
-
-  const handleServerSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg('');
-    setSubmitting(true);
+    onLaunchChange(true);
+    setLaunchState('charging');
+    const startedAt = performance.now();
     try {
-      if (!serverAuthStatus.shared && !serverAuthStatus.hasAdminAccount && !serverAuthStatus.envAdminConfigured) {
-        const res = await bootstrapServerAdmin({
-          username,
-          displayName: displayName || 'مدير النظام',
-          password,
-        });
-        if (!res.ok) setErrorMsg(res.error || 'تعذر إنشاء حساب المدير الأول.');
-      } else {
-        const res = await loginServerAccount(username, password);
-        if (!res.ok) setErrorMsg(res.error || 'بيانات الدخول غير صحيحة.');
+      const result = await authenticate();
+      if (!result.ok) {
+        setErrorMsg(result.error || fallbackError);
+        return;
       }
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const remainingCharge = 380 - (performance.now() - startedAt);
+      if (!reducedMotion && remainingCharge > 0) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, remainingCharge));
+      }
+      setLaunchState('complete');
+      await new Promise<void>((resolve) => window.setTimeout(resolve, reducedMotion ? 200 : 600));
+    } catch {
+      setErrorMsg(fallbackError);
     } finally {
-      setSubmitting(false);
+      submitting.current = false;
+      setLaunchState('idle');
+      onLaunchChange(false);
     }
+  }
+
+  const handleDemoSubmit = (event: React.FormEvent) =>
+    void submitLogin(event, () => loginDemoAccount(selectedDemoId), 'تعذر تسجيل الدخول التجريبي.');
+
+  const handleServerSubmit = (event: React.FormEvent) => {
+    const needsAdmin = !serverAuthStatus.shared && !serverAuthStatus.hasAdminAccount && !serverAuthStatus.envAdminConfigured;
+    return void submitLogin(event, () => needsAdmin
+      ? bootstrapServerAdmin({ username, displayName: displayName || 'مدير النظام', password })
+      : loginServerAccount(username, password),
+    needsAdmin ? 'تعذر إنشاء حساب المدير الأول.' : 'بيانات الدخول غير صحيحة.');
   };
 
   return (
-    <div className="min-h-screen flex flex-col justify-center items-center px-4 py-8">
+    <div className="w-full min-w-0">
       <div className="w-full max-w-2xl space-y-4">
         {/* Top Bar with Theme Switch */}
         <div className="flex items-center justify-between">
@@ -105,12 +196,14 @@ export const LoginView: React.FC = () => {
           </div>
         )}
 
+        <style>{loginStyles}</style>
         {/* Auth Card */}
-        <div className="glass-panel rounded-2xl p-5 sm:p-6 space-y-5 shadow-xl">
+        <div className="haq-login-neon rounded-2xl p-5 sm:p-6 space-y-5">
           {/* Mode Tabs */}
           {!serverAuthStatus.shared && <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-1 rounded-xl bg-slate-100 dark:bg-[#14161b] border border-slate-200 dark:border-white/10">
             <button
               type="button"
+              disabled={launchState !== 'idle'}
               onClick={() => {
                 setTab('local_demo');
                 setErrorMsg('');
@@ -126,6 +219,7 @@ export const LoginView: React.FC = () => {
             </button>
             <button
               type="button"
+              disabled={launchState !== 'idle'}
               onClick={() => {
                 setTab('server');
                 setErrorMsg('');
@@ -194,13 +288,7 @@ export const LoginView: React.FC = () => {
               </div>
 
               <div className="flex justify-end pt-1">
-                <button
-                  type="submit"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-sm font-bold"
-                >
-                  <LogIn className="w-4 h-4" />
-                  <span>دخول إلى المعاينة المحلية</span>
-                </button>
+                <LaunchButton state={launchState} label="دخول إلى المعاينة المحلية" />
               </div>
             </form>
           ) : (
@@ -229,59 +317,14 @@ export const LoginView: React.FC = () => {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                        اسم المستخدم للمدير *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        minLength={3}
-                        dir="ltr"
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value)}
-                        placeholder="admin"
-                        className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-sm font-mono-tabular"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                        الاسم الظاهر
-                      </label>
-                      <input
-                        type="text"
-                        value={displayName}
-                        onChange={(e) => setDisplayName(e.target.value)}
-                        placeholder="فهد الدوسري"
-                        className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-sm"
-                      />
-                    </div>
+                    <LoginField label="اسم المستخدم للمدير" value={username} onChange={setUsername} autoComplete="username" required minLength={3} />
+                    <LoginField label="الاسم الظاهر" value={displayName} onChange={setDisplayName} autoComplete="name" />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      كلمة المرور (6 أحرف على الأقل) *
-                    </label>
-                    <input
-                      type="password"
-                      required
-                      minLength={6}
-                      dir="ltr"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-sm font-mono-tabular"
-                    />
-                  </div>
+                  <LoginField label="كلمة المرور (6 أحرف على الأقل)" value={password} onChange={setPassword} autoComplete="new-password" required minLength={6} />
 
                   <div className="flex justify-end">
-                    <button
-                      type="submit"
-                      disabled={submitting}
-                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 text-sm font-bold disabled:opacity-60"
-                    >
-                      <KeyRound className="w-4 h-4" />
-                      <span>{submitting ? 'جارٍ التفعيل...' : 'تفعيل حساب المدير والدخول'}</span>
-                    </button>
+                    <LaunchButton state={launchState} label="تفعيل حساب المدير والدخول" />
                   </div>
                 </form>
               ) : (
@@ -290,44 +333,12 @@ export const LoginView: React.FC = () => {
                     متصل بالخادم الفعلي — يتم التحقق من كلمة المرور والصلاحيات على الخادم عبر جلسة محمية (<code className="font-mono-tabular">HttpOnly Cookie</code>).
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      اسم المستخدم
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      dir="ltr"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      placeholder="admin أو اسم المستخدم المضاف"
-                      className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-sm font-mono-tabular"
-                    />
-                  </div>
+                  <LoginField label="اسم المستخدم" value={username} onChange={setUsername} autoComplete="username" required />
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      كلمة المرور
-                    </label>
-                    <input
-                      type="password"
-                      required
-                      dir="ltr"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-sm font-mono-tabular"
-                    />
-                  </div>
+                  <LoginField label="كلمة المرور" value={password} onChange={setPassword} autoComplete="current-password" required />
 
                   <div className="flex justify-end">
-                    <button
-                      type="submit"
-                      disabled={submitting}
-                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-sm font-bold disabled:opacity-60"
-                    >
-                      <LogIn className="w-4 h-4" />
-                      <span>{submitting ? 'جارٍ التحقق...' : 'تسجيل الدخول عبر الخادم'}</span>
-                    </button>
+                    <LaunchButton state={launchState} label="تسجيل الدخول عبر الخادم" />
                   </div>
                 </form>
               )}
@@ -337,4 +348,149 @@ export const LoginView: React.FC = () => {
       </div>
     </div>
   );
-};
+}
+
+// Glass Neon Login (UI Vault) and Fluid Morph Execute Button (Cinematic UI Showcase).
+const loginStyles = `
+.haq-login-neon {
+  --neon-accent: #67e8f9;
+  --neon-glass-opacity: .13;
+  --neon-blur: 16px;
+  --neon-hue-speed: 6s;
+  --neon-pulse-speed: 4s;
+  position: relative;
+  isolation: isolate;
+  border: 1px solid color-mix(in srgb, var(--neon-accent) 45%, transparent);
+  background: rgb(160 192 216 / var(--neon-glass-opacity));
+  backdrop-filter: blur(var(--neon-blur));
+}
+.haq-login-neon::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  content: '';
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(150deg, rgb(255 255 255 / .12), transparent 55%);
+  box-shadow: 0 0 25px color-mix(in srgb, var(--neon-accent) 40%, transparent);
+  animation: haq-neon-hue var(--neon-hue-speed) linear infinite, haq-neon-pulse var(--neon-pulse-speed) ease-in-out infinite;
+}
+@keyframes haq-neon-hue { to { filter: hue-rotate(360deg); } }
+@keyframes haq-neon-pulse { 50% { opacity: .55; } }
+.haq-login-field {
+  position: relative;
+  margin-block: .55rem;
+  border-bottom: 1px solid rgb(255 255 255 / .45);
+}
+.haq-login-field:focus-within { border-color: var(--neon-accent); }
+.haq-login-field input {
+  width: 100%;
+  min-height: 46px;
+  padding: 8px 4px 4px 74px;
+  border: 0;
+  outline: 0;
+  color: white;
+  background: transparent;
+}
+.haq-login-field label {
+  position: absolute;
+  right: 4px;
+  top: 12px;
+  color: #f1f5f9;
+  pointer-events: none;
+  transition: top .2s, font-size .2s, color .2s;
+}
+.haq-login-field:focus-within label,
+.haq-login-field[data-filled="true"] label,
+.haq-login-field:has(input:autofill) label {
+  top: -12px;
+  font-size: .75rem;
+  color: var(--neon-accent);
+}
+.haq-login-field-icons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  position: absolute;
+  left: 4px;
+  top: 6px;
+  color: #dbeafe;
+}
+.haq-login-field-icons button { padding: 6px; border-radius: 6px; }
+.haq-launch {
+  position: relative;
+  padding: 16px 36px;
+  border-radius: 999px;
+  border: 1px solid rgba(103, 232, 249, 0.4);
+  background: radial-gradient(circle at var(--bx, 50%) var(--by, 50%), rgba(103, 232, 249, 0.3) 0%, rgba(15, 23, 42, 0.95) 70%);
+  color: #ffffff;
+  cursor: pointer;
+  overflow: visible;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), inset 0 2px 4px rgba(255, 255, 255, 0.3);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.haq-launch:not(:disabled):hover {
+  transform: scale(1.05);
+  box-shadow: 0 16px 40px rgba(6, 182, 212, 0.4), inset 0 3px 6px rgba(255, 255, 255, 0.5);
+  border-color: rgba(251, 191, 36, 0.8);
+}
+
+.haq-launch--charging {
+  transform: scale(0.96);
+  border-color: #fbbf24;
+}
+
+.haq-launch--complete {
+  transform: scale(1.02);
+  border-color: #34d399;
+  background: radial-gradient(circle at 50% 50%, rgba(52, 211, 153, 0.35) 0%, rgba(15, 23, 42, 0.95) 70%);
+}
+
+.haq-launch-progress {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+
+  background: linear-gradient(90deg, rgba(251, 191, 36, 0.4) 0%, rgba(6, 182, 212, 0.4) 100%);
+  animation: haq-launch-charge .38s ease-in-out both;
+}
+
+@keyframes haq-launch-charge {
+  from { clip-path: inset(0 100% 0 0 round 999px); }
+  to { clip-path: inset(0 round 999px); }
+}
+
+.haq-launch-shockwave {
+  position: absolute;
+  inset: -3px;
+  border-radius: 999px;
+  border: 2px solid #34d399;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.haq-launch--complete .haq-launch-shockwave {
+  animation: haq-launch-ring 0.6s ease-out forwards;
+}
+
+@keyframes haq-launch-ring {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+
+.haq-launch { width: 100%; min-height: 48px; padding: 10px 16px; }
+.haq-launch:focus-visible, .haq-login-field-icons button:focus-visible {
+  outline: 2px solid var(--neon-accent);
+  outline-offset: 3px;
+}
+.haq-launch--charging { cursor: wait; }
+@media (prefers-reduced-motion: reduce) {
+  .haq-login-neon::before, .haq-launch-progress,
+  .haq-launch--complete .haq-launch-shockwave { animation: none; }
+  .haq-launch, .haq-login-field label { transition: none; }
+  .haq-launch:not(:disabled):hover, .haq-launch:disabled { transform: none; }
+}
+`;
