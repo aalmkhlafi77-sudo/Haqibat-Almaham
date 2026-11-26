@@ -15,19 +15,16 @@ import {
   RotateCcw,
   Server,
   Settings,
-  Shield,
   Sun,
   Tag,
   Trash2,
   Upload,
-  UserPlus,
   Wifi,
   WifiOff,
   X,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { effectiveGeminiModel } from '../domain/assistant';
-import { ROLE_LABELS } from '../domain/authPermissions';
 import {
   BACKUP_SCHEMA_VERSION,
   computeBackupSummaryCounts,
@@ -42,15 +39,14 @@ import {
   VAT_3A_LINE_DEFINITIONS,
 } from '../domain/vat3aEngine';
 import {
-  AuthUser,
   IntegrationSettings,
   UrgentAlertDays,
   UrgentAlertMotionMode,
-  UserRole,
   Vat3AAdjustmentDirection,
   Vat3ALineId,
   Vat3ATaxMethod,
 } from '../types/domain';
+import { ServerAccounts } from './ServerAccounts';
 import { StatusBadge } from './StatusBadge';
 
 export const SettingsView: React.FC = () => {
@@ -58,7 +54,6 @@ export const SettingsView: React.FC = () => {
     db,
     currentUser,
     authMode,
-    serverAuthStatus,
     lastBackupMeta,
     hasPerm,
     setTheme,
@@ -93,14 +88,6 @@ export const SettingsView: React.FC = () => {
   const [backupFileName, setBackupFileName] = useState('');
   const [restoringBackup, setRestoringBackup] = useState(false);
   const [exportingBackup, setExportingBackup] = useState(false);
-
-  // Server User Management state (available when connected as Server Admin)
-  const [serverUsersList, setServerUsersList] = useState<AuthUser[]>([]);
-  const [newStaffUsername, setNewStaffUsername] = useState('');
-  const [newStaffName, setNewStaffName] = useState('');
-  const [newStaffRole, setNewStaffRole] = useState<UserRole>('operations');
-  const [newStaffPassword, setNewStaffPassword] = useState('');
-  const [staffMessage, setStaffMessage] = useState('');
 
   // Document Categories management state
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -197,51 +184,6 @@ export const SettingsView: React.FC = () => {
       }
     } finally {
       setRestoringBackup(false);
-    }
-  };
-
-  const handleLoadServerUsers = async () => {
-    try {
-      const res = await fetch('/api/auth/users', { credentials: 'include' });
-      if (res.ok) {
-        const data = (await res.json()) as { users?: AuthUser[] };
-        setServerUsersList(data.users || []);
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  const handleCreateServerUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setStaffMessage('');
-    try {
-      const res = await fetch('/api/auth/users', {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest',
-        },
-        body: JSON.stringify({
-          username: newStaffUsername,
-          displayName: newStaffName || newStaffUsername,
-          role: newStaffRole,
-          password: newStaffPassword,
-        }),
-      });
-      const data = (await res.json()) as { user?: AuthUser; error?: string };
-      if (!res.ok) {
-        setStaffMessage(data.error || 'تعذر إنشاء الحساب على الخادم.');
-        return;
-      }
-      setNewStaffUsername('');
-      setNewStaffName('');
-      setNewStaffPassword('');
-      setStaffMessage(`تم إنشاء حساب «${data.user?.displayName}» (${data.user?.roleLabel}) بنجاح.`);
-      await handleLoadServerUsers();
-    } catch {
-      setStaffMessage('تعذر الاتصال بالخادم لإنشاء الحساب.');
     }
   };
 
@@ -1298,98 +1240,7 @@ export const SettingsView: React.FC = () => {
         )}
       </div>
 
-      {/* Server Accounts & RBAC Management (visible in Server Mode for Admin) */}
-      {authMode === 'server' && canManageSettings && (
-        <div className="glass-panel rounded-xl p-5 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Shield className="w-4 h-4 text-blue-500" />
-                <span>إدارة حسابات الخادم والصلاحيات</span>
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                إنشاء حسابات الموظفين على الخادم بصلاحيات محددة (قراءة/تعديل، تقارير، ضريبة 3A، نسخ احتياطي) دون كشف كلمات المرور.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleLoadServerUsers}
-              className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/15 text-xs font-semibold"
-            >
-              تحديث القائمة
-            </button>
-          </div>
-
-          <form onSubmit={handleCreateServerUser} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-            <input
-              type="text"
-              required
-              minLength={3}
-              dir="ltr"
-              value={newStaffUsername}
-              onChange={(e) => setNewStaffUsername(e.target.value)}
-              placeholder="اسم المستخدم (مثل sara.tax)"
-              className="rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-xs font-mono-tabular"
-            />
-            <input
-              type="text"
-              value={newStaffName}
-              onChange={(e) => setNewStaffName(e.target.value)}
-              placeholder="الاسم الظاهر"
-              className="rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-3 py-2 text-xs"
-            />
-            <select
-              value={newStaffRole}
-              onChange={(e) => setNewStaffRole(e.target.value as UserRole)}
-              className="rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-2.5 py-2 text-xs"
-            >
-              <option value="tax_accountant">{ROLE_LABELS.tax_accountant}</option>
-              <option value="operations">{ROLE_LABELS.operations}</option>
-              <option value="viewer">{ROLE_LABELS.viewer}</option>
-              <option value="admin">{ROLE_LABELS.admin}</option>
-            </select>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                required
-                minLength={serverAuthStatus.shared ? 12 : 6}
-                dir="ltr"
-                value={newStaffPassword}
-                onChange={(e) => setNewStaffPassword(e.target.value)}
-                placeholder={serverAuthStatus.shared ? 'كلمة المرور (12+)' : 'كلمة المرور (6+)'}
-                className="flex-1 min-w-0 rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-2.5 py-2 text-xs font-mono-tabular"
-              />
-              <button
-                type="submit"
-                className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold shrink-0"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>إضافة</span>
-              </button>
-            </div>
-          </form>
-
-          {staffMessage && (
-            <p className="text-xs text-blue-700 dark:text-blue-300 font-medium">{staffMessage}</p>
-          )}
-
-          {serverUsersList.length > 0 && (
-            <div className="divide-y divide-slate-100 dark:divide-white/10 rounded-xl border border-slate-200 dark:border-white/10 overflow-hidden">
-              {serverUsersList.map((u) => (
-                <div key={u.id} className="px-3.5 py-2 flex items-center justify-between text-xs">
-                  <div>
-                    <span className="font-bold text-slate-900 dark:text-white">{u.displayName}</span>
-                    <span className="text-slate-500 dark:text-slate-400 font-mono-tabular mr-2">
-                      @{u.username}
-                    </span>
-                  </div>
-                  <StatusBadge label={u.roleLabel} tone="info" />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {authMode === 'server' && canManageSettings && <ServerAccounts />}
 
       {/* Reset Demo Data */}
       {authMode === 'local_demo' && <div className="glass-panel rounded-xl p-5 flex flex-wrap items-center justify-between gap-3">

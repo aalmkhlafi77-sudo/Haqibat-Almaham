@@ -26,6 +26,10 @@ export interface WorkspaceStore {
   change(change: (workspace: Workspace) => void, keepRestorePoint?: boolean): Promise<Workspace>;
   users(): Promise<ServerUserAccount[]>;
   addUser(account: ServerUserAccount, firstOnly?: boolean): Promise<boolean>;
+  changeUser(
+    id: string,
+    change: (account: ServerUserAccount | undefined, accounts: readonly ServerUserAccount[]) => ServerUserAccount | null,
+  ): Promise<ServerUserAccount | null>;
 }
 
 export function createPreviewStore(): WorkspaceStore {
@@ -47,6 +51,15 @@ export function createPreviewStore(): WorkspaceStore {
       }
       accounts.push(account);
       return true;
+    },
+    async changeUser(id, change) {
+      const index = accounts.findIndex((account) => account.id === id);
+      const next = change(accounts[index], accounts);
+      if (index >= 0) {
+        if (next) accounts[index] = next;
+        else accounts.splice(index, 1);
+      }
+      return next;
     },
   };
 }
@@ -155,6 +168,24 @@ export async function openMysqlStore(): Promise<WorkspaceStore> {
             account.specialistId, account.passwordSalt, account.passwordHash, account.isActive, account.createdAt]
         );
         return true;
+      });
+    },
+    async changeUser(id, change) {
+      return transaction(async (connection) => {
+        await connection.execute('SELECT id FROM haqibat_workspace WHERE id = 1 FOR UPDATE');
+        const accounts = await getUsers(connection);
+        const next = change(accounts.find((account) => account.id === id), accounts);
+        if (next) {
+          await connection.execute(
+            `UPDATE haqibat_accounts
+                SET username = ?, display_name = ?, email = ?, role = ?, password_salt = ?, password_hash = ?
+              WHERE id = ?`,
+            [next.username, next.displayName, next.email, next.role, next.passwordSalt, next.passwordHash, id]
+          );
+        } else {
+          await connection.execute('DELETE FROM haqibat_accounts WHERE id = ?', [id]);
+        }
+        return next;
       });
     },
   };

@@ -7,6 +7,8 @@ import type {
   UserRole,
 } from '../types/domain.ts';
 
+export const PRIMARY_ADMIN_ID = 'srv-admin-01';
+
 export const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'مدير النظام',
   tax_accountant: 'محاسب ضريبي',
