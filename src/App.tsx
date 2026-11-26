@@ -22,6 +22,7 @@ import { AppProvider, useApp } from './context/AppContext';
 
 const MainRouter: React.FC = () => {
   const { db, currentUser, authLoading, hasPerm, workspaceSync, refreshWorkspace } = useApp();
+  const [loginLaunching, setLoginLaunching] = React.useState(false);
   const activeNav = db.preferences.activeNav;
 
   if (authLoading) {
@@ -32,10 +33,10 @@ const MainRouter: React.FC = () => {
     );
   }
 
-  if (!currentUser) {
+  if (!currentUser || loginLaunching) {
     return (
       <HaqibatLampLogin>
-        <LoginView />
+        <LoginView onLaunchChange={setLoginLaunching} />
       </HaqibatLampLogin>
     );
   }
