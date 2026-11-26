@@ -98,6 +98,11 @@ test('authenticated HTTP preview of 20 vehicles requires an explicit, atomic com
   t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
     assert.match(String(url), /generativelanguage\.googleapis\.com/);
     assert.match(String(init.body), /لوحة 20/);
+    const { generationConfig } = JSON.parse(String(init.body));
+    assert.equal(generationConfig.responseMimeType, 'application/json');
+    assert.equal(generationConfig.responseJsonSchema.properties.rows.type, 'array');
+    assert.doesNotMatch(JSON.stringify(generationConfig.responseJsonSchema),
+      /"maxItems"|"minItems"|"minimum"|"maximum"|"maxLength"|"minLength"/);
     providerCalls++;
     return Response.json({
       candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify({
