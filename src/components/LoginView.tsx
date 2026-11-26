@@ -1,7 +1,7 @@
+import { HaqibatMark } from './HaqibatBrand';
 import React, { useState } from 'react';
 import {
   AlertCircle,
-  Briefcase,
   CheckCircle2,
   KeyRound,
   LogIn,
@@ -75,12 +75,10 @@ export const LoginView: React.FC = () => {
         {/* Top Bar with Theme Switch */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm">
-              <Briefcase className="w-5 h-5" />
-            </div>
+            <HaqibatMark />
             <div>
-              <h1 className="text-lg font-bold text-slate-900 dark:text-white">حقيبة المهام</h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+              <h2 className="text-lg font-bold text-[#fff0d8]">حقيبة المهام</h2>
+              <p className="text-xs text-[#ded0bb]">
                 متابعة المهام والوثائق والجلسات وضريبة القيمة المضافة 3A
               </p>
             </div>
