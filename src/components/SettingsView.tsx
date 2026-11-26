@@ -57,6 +57,7 @@ export const SettingsView: React.FC = () => {
     db,
     currentUser,
     authMode,
+    serverAuthStatus,
     lastBackupMeta,
     hasPerm,
     setTheme,
@@ -920,7 +921,7 @@ export const SettingsView: React.FC = () => {
             <span>تكاملات الخادم والذكاء الاصطناعي</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
-            تُحفظ مفاتيح الربط وكلمات مرور قاعدة البيانات على الخادم فقط (لا تُخزّن أي مفاتيح سرية داخل المتصفح). يظل النظام يعمل محليًا بالكامل عند عدم الاتصال.
+            تُحفظ مفاتيح الربط وكلمات مرور قاعدة البيانات على الخادم فقط (لا تُخزّن أي مفاتيح سرية داخل المتصفح). {authMode === 'server' ? 'يحتاج حفظ السجلات المشتركة إلى الاتصال بالخادم.' : 'تظل المعاينة المحلية متاحة عند عدم الاتصال.'}
           </p>
         </div>
 
@@ -1365,11 +1366,11 @@ export const SettingsView: React.FC = () => {
               <input
                 type="password"
                 required
-                minLength={6}
+                minLength={serverAuthStatus.shared ? 12 : 6}
                 dir="ltr"
                 value={newStaffPassword}
                 onChange={(e) => setNewStaffPassword(e.target.value)}
-                placeholder="كلمة المرور (6+)"
+                placeholder={serverAuthStatus.shared ? 'كلمة المرور (12+)' : 'كلمة المرور (6+)'}
                 className="flex-1 min-w-0 rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] px-2.5 py-2 text-xs font-mono-tabular"
               />
               <button
@@ -1405,7 +1406,7 @@ export const SettingsView: React.FC = () => {
       )}
 
       {/* Reset Demo Data */}
-      <div className="glass-panel rounded-xl p-5 flex flex-wrap items-center justify-between gap-3">
+      {authMode === 'local_demo' && <div className="glass-panel rounded-xl p-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-sm font-bold text-slate-900 dark:text-white">
             إعادة ضبط البيانات التجريبية
@@ -1450,7 +1451,7 @@ export const SettingsView: React.FC = () => {
             </button>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Delete Document Category Confirmation Modal (Transfer or Clear, Never Delete Documents) */}
       {deletingCatId && (() => {

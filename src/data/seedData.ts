@@ -78,6 +78,25 @@ export function buildDefaultPreferences(): AppPreferences {
   };
 }
 
+export function createEmptyDatabase(): AppDatabaseState {
+  return {
+    organizations: [{ id: 'org-01', name: 'حقيبة المهام' }],
+    specialists: [],
+    documentCategories: [],
+    taskTypes: buildInitialTaskTypes(),
+    tasks: [],
+    documents: [],
+    cases: [],
+    sessions: [],
+    poas: [],
+    calendarItems: [],
+    labels: [],
+    shareLogs: [],
+    vat3aDrafts: [],
+    preferences: { ...buildDefaultPreferences(), currentSpecialistId: '' },
+  };
+}
+
 export function createSeedDatabase(): AppDatabaseState {
   const today = getTodayISO();
   const nowIso = `${today}T09:00:00`;

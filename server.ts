@@ -2,10 +2,12 @@ import 'dotenv/config';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { rateLimit } from 'express-rate-limit';
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { createServer as createViteServer } from 'vite';
-import { createSeedDatabase } from './src/data/seedData';
-import { migrateDatabaseState } from './src/data/repository';
+import { migrateDatabaseState, StateDataRepository } from './src/data/repository';
+import { createPreviewStore, openMysqlStore, type ServerUserAccount, type Workspace, type WorkspaceStore } from './server/workspaceStore';
+import { applyWorkspaceCommand, assertRestorableWorkspace, RequestError } from './server/workspaceCommands';
+import { taskItemSchema, vat3ADraftSchema, vat3ARulesConfigSchema } from './server/workspaceSchemas';
 import {
   hasPermission,
   ROLE_LABELS,
@@ -16,27 +18,11 @@ import {
   validateBackupFileText,
 } from './src/domain/backupUtils';
 import type {
-  AppDatabaseState,
   AuthUser,
   TaskItem,
   UserPermission,
   UserRole,
-  Vat3ADraft,
-  Vat3ARulesConfig,
 } from './src/types/domain';
-
-interface ServerUserAccount {
-  id: string;
-  username: string;
-  displayName: string;
-  email: string;
-  role: UserRole;
-  specialistId: string | null;
-  passwordSalt: string;
-  passwordHash: string;
-  isActive: boolean;
-  createdAt: string;
-}
 
 interface SessionPayload {
   uid: string;
@@ -127,39 +113,63 @@ function toPublicAuthUser(acc: ServerUserAccount): AuthUser {
   };
 }
 
-function setSessionCookie(res: Response, token: string): void {
+function setSessionCookie(res: Response, token: string, shared: boolean): void {
   res.cookie(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
     secure: true,
-    sameSite: 'none',
-    partitioned: true,
+    sameSite: shared ? 'lax' : 'none',
+    partitioned: !shared,
     path: '/',
     maxAge: SESSION_TTL_MS,
   });
 }
 
-function clearSessionCookie(res: Response): void {
+function clearSessionCookie(res: Response, shared: boolean): void {
   res.clearCookie(SESSION_COOKIE_NAME, {
     httpOnly: true,
     secure: true,
-    sameSite: 'none',
-    partitioned: true,
+    sameSite: shared ? 'lax' : 'none',
+    partitioned: !shared,
     path: '/',
   });
 }
 
-export function createServerApp() {
+type Route = (req: Request, res: Response, next: NextFunction) => unknown;
+
+const asyncRoute = (route: Route) => (req: Request, res: Response, next: NextFunction) => {
+  Promise.resolve().then(() => route(req, res, next)).catch(next);
+};
+
+function publicWorkspace(workspace: Workspace, user: AuthUser): Workspace {
+  const canViewVat = hasPermission(user, 'vat3a:view');
+  return {
+    revision: workspace.revision,
+    state: {
+      ...workspace.state,
+      shareLogs: canViewVat
+        ? workspace.state.shareLogs
+        : workspace.state.shareLogs.filter((log) => log.recordType !== 'vat_3a'),
+      vat3aDrafts: canViewVat ? workspace.state.vat3aDrafts : [],
+    },
+  };
+}
+
+export function createServerApp(store: WorkspaceStore = createPreviewStore()) {
   const app = express();
+  const shared = store.mode === 'mysql';
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '5mb' }));
+  app.use('/api', (_req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    next();
+  });
 
-  // In-memory operational state for Stage 1/Preview Server testing
-  // (Stage 2 Hostinger swaps this for mysql2 queries against database/001_init_haqibat_almaham.sql)
-  let serverDb: AppDatabaseState = createSeedDatabase();
-  const serverUsers: ServerUserAccount[] = [];
-  let adminClaimed = false;
+  const changeRecords = (change: (repo: StateDataRepository) => void) =>
+    store.change((workspace) => {
+      change(new StateDataRepository(() => workspace.state, (state) => { workspace.state = state; }));
+    });
 
-  const getEnvAdminPasscode = () => (process.env.ADMIN_PASSCODE || '').trim();
+  const getEnvAdminPasscode = () => shared ? '' : (process.env.ADMIN_PASSCODE || '').trim();
   const isEnvAdminConfigured = () => getEnvAdminPasscode().length > 0;
 
   const buildEnvAdminAccount = (): ServerUserAccount => ({
@@ -175,7 +185,7 @@ export function createServerApp() {
     createdAt: new Date().toISOString().slice(0, 19),
   });
 
-  const resolveUserFromRequest = (req: Request): AuthUser | null => {
+  const resolveUserFromRequest = async (req: Request): Promise<AuthUser | null> => {
     const authHeader = req.headers.authorization;
     let token = '';
     if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
@@ -190,7 +200,7 @@ export function createServerApp() {
     if (payload.uid === 'srv-admin-env' && isEnvAdminConfigured()) {
       return toPublicAuthUser(buildEnvAdminAccount());
     }
-    const found = serverUsers.find((u) => u.id === payload.uid && u.isActive);
+    const found = (await store.users()).find((u) => u.id === payload.uid && u.isActive);
     return found ? toPublicAuthUser(found) : null;
   };
 
@@ -230,15 +240,26 @@ export function createServerApp() {
   };
 
   app.use('/api', verifyCsrfForMutations);
+  if (shared) {
+    app.use('/api/auth/login', rateLimit({
+      windowMs: 15 * 60_000,
+      limit: 12,
+      skipSuccessfulRequests: true,
+      standardHeaders: 'draft-8',
+      legacyHeaders: false,
+      message: { error: 'تكررت محاولات الدخول. حاول مجددًا بعد قليل.' },
+    }));
+  }
 
-  const requireAuth = (req: Request, res: Response, next: NextFunction) => {
-    const user = resolveUserFromRequest(req);
+
+  const requireAuth = asyncRoute(async (req, res, next) => {
+    const user = await resolveUserFromRequest(req);
     if (!user) {
       return res.status(401).json({ error: 'يلزم تسجيل الدخول أولًا للوصول إلى هذا المورد.' });
     }
     (req as Request & { authUser?: AuthUser }).authUser = user;
     return next();
-  };
+  });
 
   const requirePermission =
     (perm: UserPermission) => (req: Request, res: Response, next: NextFunction) => {
@@ -256,16 +277,15 @@ export function createServerApp() {
     };
 
   // Health & Auth Status
-  app.get('/api/health', (_req, res) => {
+  app.get('/api/health', asyncRoute(async (_req, res) => {
+    await store.read();
     res.json({
       ok: true,
       mode: 'server',
-      storageStage: 'server_memory_ready_for_mysql',
-      envAdminConfigured: isEnvAdminConfigured(),
-      hasAdminAccount: isEnvAdminConfigured() || adminClaimed,
-      checkedAt: new Date().toISOString().slice(0, 19),
+      storageStage: shared ? 'mysql' : 'server_memory_ready_for_mysql',
+      databaseReady: shared,
     });
-  });
+  }));
 
   app.get('/api/ai/status', (_req, res) => {
     res.json({
@@ -277,45 +297,47 @@ export function createServerApp() {
     });
   });
 
-  app.get('/api/auth/status', (req, res) => {
-    const user = resolveUserFromRequest(req);
+  app.get('/api/auth/status', asyncRoute(async (req, res) => {
+    const user = await resolveUserFromRequest(req);
     res.json({
+      shared,
       envAdminConfigured: isEnvAdminConfigured(),
-      hasAdminAccount: isEnvAdminConfigured() || adminClaimed,
+      hasAdminAccount: isEnvAdminConfigured() || (await store.users()).some((u) => u.role === 'admin'),
       authenticated: Boolean(user),
       user,
     });
-  });
+  }));
 
   // First-run Admin Claim (atomic & one-time; disabled if ADMIN_PASSCODE is set or already claimed)
-  app.post('/api/auth/bootstrap-admin', (req, res) => {
+  app.post('/api/auth/bootstrap-admin', asyncRoute(async (req, res) => {
+    if (shared) return res.status(403).json({ error: 'يُنشأ حساب المالك من إعدادات الخادم.' });
     if (isEnvAdminConfigured()) {
       return res.status(409).json({
         error: 'تم ضبط رمز المدير مسبقًا في إعدادات بيئة الخادم (ADMIN_PASSCODE).',
       });
     }
-    if (adminClaimed) {
+    if ((await store.users()).some((u) => u.role === 'admin')) {
       return res.status(409).json({
         error: 'تم تفعيل حساب المدير الأول مسبقًا؛ استخدم شاشة تسجيل الدخول.',
       });
     }
 
-    const { username, displayName, email, password } = req.body as {
+    const { username, displayName, email, password } = (req.body ?? {}) as {
       username?: string;
       displayName?: string;
       email?: string;
       password?: string;
     };
-    const cleanUser = (username || '').trim().toLowerCase();
-    const cleanName = (displayName || 'مدير النظام').trim();
-    const cleanEmail = (email || 'admin@haqibat-almaham.local').trim();
+    const cleanUser = typeof username === 'string' ? username.trim().toLowerCase() : '';
+    const cleanName = typeof displayName === 'string' ? displayName.trim() || 'مدير النظام' : 'مدير النظام';
+    const cleanEmail = typeof email === 'string' ? email.trim() : 'admin@haqibat-almaham.local';
     const cleanPass = typeof password === 'string' ? password : '';
 
     if (cleanUser.length < 3) {
       return res.status(400).json({ error: 'اسم المستخدم يجب أن لا يقل عن 3 أحرف.' });
     }
-    if (cleanPass.length < 6) {
-      return res.status(400).json({ error: 'كلمة المرور يجب أن لا تقل عن 6 أحرف.' });
+    if (cleanPass.length < (shared ? 12 : 6) || cleanPass.length > 256) {
+      return res.status(400).json({ error: shared ? 'كلمة المرور يجب أن تكون بين 12 و256 حرفًا.' : 'كلمة المرور يجب أن تكون بين 6 و256 حرفًا.' });
     }
 
     const { salt, hash } = hashPasswordScrypt(cleanPass);
@@ -331,8 +353,9 @@ export function createServerApp() {
       isActive: true,
       createdAt: new Date().toISOString().slice(0, 19),
     };
-    serverUsers.push(adminAcc);
-    adminClaimed = true;
+    if (!(await store.addUser(adminAcc, true))) {
+      return res.status(409).json({ error: 'تم تفعيل حساب المدير الأول مسبقًا.' });
+    }
 
     const token = signSessionToken({
       uid: adminAcc.id,
@@ -340,22 +363,22 @@ export function createServerApp() {
       role: adminAcc.role,
       exp: Date.now() + SESSION_TTL_MS,
     });
-    setSessionCookie(res, token);
+    setSessionCookie(res, token, shared);
     return res.status(201).json({
       user: toPublicAuthUser(adminAcc),
       token,
     });
-  });
+  }));
 
-  app.post('/api/auth/login', (req, res) => {
-    const { username, password } = req.body as {
+  app.post('/api/auth/login', asyncRoute(async (req, res) => {
+    const { username, password } = (req.body ?? {}) as {
       username?: string;
       password?: string;
     };
-    const cleanUser = (username || '').trim().toLowerCase();
+    const cleanUser = typeof username === 'string' ? username.trim().toLowerCase() : '';
     const cleanPass = typeof password === 'string' ? password : '';
 
-    if (!cleanUser || !cleanPass) {
+    if (!cleanUser || cleanUser.length > 100 || !cleanPass || cleanPass.length > 256) {
       return res.status(400).json({ error: 'يرجى إدخال اسم المستخدم وكلمة المرور.' });
     }
 
@@ -371,11 +394,11 @@ export function createServerApp() {
         role: envAdmin.role,
         exp: Date.now() + SESSION_TTL_MS,
       });
-      setSessionCookie(res, token);
+      setSessionCookie(res, token, shared);
       return res.json({ user: toPublicAuthUser(envAdmin), token });
     }
 
-    const acc = serverUsers.find((u) => u.username === cleanUser && u.isActive);
+    const acc = (await store.users()).find((u) => u.username === cleanUser && u.isActive);
     if (!acc || !verifyPasswordScrypt(cleanPass, acc.passwordSalt, acc.passwordHash)) {
       return res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة.' });
     }
@@ -386,9 +409,9 @@ export function createServerApp() {
       role: acc.role,
       exp: Date.now() + SESSION_TTL_MS,
     });
-    setSessionCookie(res, token);
+    setSessionCookie(res, token, shared);
     return res.json({ user: toPublicAuthUser(acc), token });
-  });
+  }));
 
   app.get('/api/auth/me', requireAuth, (req, res) => {
     const user = (req as Request & { authUser?: AuthUser }).authUser!;
@@ -396,19 +419,17 @@ export function createServerApp() {
   });
 
   app.post('/api/auth/logout', (_req, res) => {
-    clearSessionCookie(res);
+    clearSessionCookie(res, shared);
     res.json({ ok: true });
   });
 
   // Admin-only Staff Account Management
-  app.get('/api/auth/users', requireAuth, requirePermission('settings:manage'), (_req, res) => {
-    res.json({
-      users: serverUsers.map((u) => toPublicAuthUser(u)),
-    });
-  });
+  app.get('/api/auth/users', requireAuth, requirePermission('settings:manage'), asyncRoute(async (_req, res) => {
+    res.json({ users: (await store.users()).map(toPublicAuthUser) });
+  }));
 
-  app.post('/api/auth/users', requireAuth, requirePermission('settings:manage'), (req, res) => {
-    const { username, displayName, email, role, specialistId, password } = req.body as {
+  app.post('/api/auth/users', requireAuth, requirePermission('settings:manage'), asyncRoute(async (req, res) => {
+    const { username, displayName, email, role, specialistId, password } = (req.body ?? {}) as {
       username?: string;
       displayName?: string;
       email?: string;
@@ -416,28 +437,31 @@ export function createServerApp() {
       specialistId?: string | null;
       password?: string;
     };
-    const cleanUser = (username || '').trim().toLowerCase();
+    const cleanUser = typeof username === 'string' ? username.trim().toLowerCase() : '';
     const cleanPass = typeof password === 'string' ? password : '';
     const validRoles: UserRole[] = ['admin', 'tax_accountant', 'operations', 'viewer'];
     if (cleanUser.length < 3) {
       return res.status(400).json({ error: 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل.' });
     }
-    if (cleanPass.length < 6) {
-      return res.status(400).json({ error: 'كلمة المرور يجب أن لا تقل عن 6 أحرف.' });
+    if (cleanPass.length < (shared ? 12 : 6) || cleanPass.length > 256) {
+      return res.status(400).json({ error: shared ? 'كلمة المرور يجب أن تكون بين 12 و256 حرفًا.' : 'كلمة المرور يجب أن تكون بين 6 و256 حرفًا.' });
     }
     if (!role || !validRoles.includes(role)) {
       return res.status(400).json({ error: 'الدور الوظيفي المحدد غير صالح.' });
     }
-    if (serverUsers.some((u) => u.username === cleanUser)) {
-      return res.status(409).json({ error: 'اسم المستخدم مسجل مسبقًا.' });
+    const cleanName = typeof displayName === 'string' ? displayName.trim() || cleanUser : cleanUser;
+    const cleanEmail = typeof email === 'string' ? email.trim() : `${cleanUser}@example.sa`;
+    if (cleanUser.length > 100 || cleanName.length > 200 || cleanEmail.length > 254 ||
+        (specialistId != null && (typeof specialistId !== 'string' || specialistId.length > 64))) {
+      return res.status(400).json({ error: 'بيانات الحساب تتجاوز الحدود المسموح بها.' });
     }
 
     const { salt, hash } = hashPasswordScrypt(cleanPass);
     const created: ServerUserAccount = {
       id: `srv-usr-${crypto.randomUUID().slice(0, 8)}`,
       username: cleanUser,
-      displayName: (displayName || cleanUser).trim(),
-      email: (email || `${cleanUser}@example.sa`).trim(),
+      displayName: cleanName,
+      email: cleanEmail,
       role,
       specialistId: specialistId || null,
       passwordSalt: salt,
@@ -445,34 +469,33 @@ export function createServerApp() {
       isActive: true,
       createdAt: new Date().toISOString().slice(0, 19),
     };
-    serverUsers.push(created);
+    if (!(await store.addUser(created))) {
+      return res.status(409).json({ error: 'اسم المستخدم مسجل مسبقًا.' });
+    }
     return res.status(201).json({ user: toPublicAuthUser(created) });
-  });
+  }));
 
-  // Protected Operational State (filters out VAT 3A if caller lacks vat3a:view)
-  app.get('/api/state', requireAuth, requirePermission('records:read'), (req, res) => {
-    const user = (req as Request & { authUser?: AuthUser }).authUser!;
-    const canViewVat = hasPermission(user, 'vat3a:view');
-    const safeState: AppDatabaseState = {
-      ...serverDb,
-      vat3aDrafts: canViewVat ? serverDb.vat3aDrafts : [],
-    };
-    res.json({ state: safeState });
-  });
+  app.get('/api/state', requireAuth, requirePermission('records:read'), asyncRoute(async (req, res) => {
+    res.json(publicWorkspace(await store.read(), (req as Request & { authUser: AuthUser }).authUser));
+  }));
 
-  // Tasks CRUD (RBAC enforced)
-  app.post('/api/tasks', requireAuth, requirePermission('records:write'), (req, res) => {
+  app.post('/api/state/commands', requireAuth, requirePermission('records:read'), asyncRoute(async (req, res) => {
+    const user = (req as Request & { authUser: AuthUser }).authUser;
+    const updated = await store.change((workspace) => applyWorkspaceCommand(workspace, req.body, user));
+    res.json(publicWorkspace(updated, user));
+  }));
+
+  app.post('/api/tasks', requireAuth, requirePermission('records:write'), asyncRoute(async (req, res) => {
     const body = req.body as Partial<TaskItem>;
-    if (!body.title || !body.dueDate || !body.typeId) {
+    if (typeof body?.title !== 'string' || !body.dueDate || !body.typeId) {
       return res.status(400).json({ error: 'حقول المهمة الأساسية مطلوبة.' });
     }
     const now = new Date().toISOString().slice(0, 19);
-    const tt = serverDb.taskTypes.find((x) => x.id === body.typeId);
     const item: TaskItem = {
       id: body.id || `task-${crypto.randomUUID().slice(0, 8)}`,
       orgId: 'org-01',
       typeId: body.typeId,
-      type: tt?.name || body.type || 'مهمة',
+      type: body.type || 'مهمة',
       title: body.title.trim(),
       specialistId: body.specialistId ?? null,
       departmentName: body.departmentName || 'عام',
@@ -480,6 +503,10 @@ export function createServerApp() {
       status: body.status || 'جديدة',
       dueDate: body.dueDate,
       notes: body.notes || '',
+      letterNumber: body.letterNumber,
+      authorityName: body.authorityName,
+      receivedDate: body.receivedDate,
+      actualDeliveryDate: body.actualDeliveryDate,
       documentId: body.documentId ?? null,
       caseId: body.caseId ?? null,
       sessionId: body.sessionId ?? null,
@@ -487,92 +514,54 @@ export function createServerApp() {
       createdAt: body.createdAt || now,
       updatedAt: now,
     };
-    const exists = serverDb.tasks.some((t) => t.id === item.id);
-    serverDb = {
-      ...serverDb,
-      tasks: exists
-        ? serverDb.tasks.map((t) => (t.id === item.id ? item : t))
-        : [item, ...serverDb.tasks],
-    };
-    return res.status(exists ? 200 : 201).json({ task: item });
-  });
-
-  app.delete('/api/tasks/:id', requireAuth, requirePermission('records:delete'), (req, res) => {
-    const { id } = req.params;
-    serverDb = {
-      ...serverDb,
-      tasks: serverDb.tasks.filter((t) => t.id !== id),
-      labels: serverDb.labels.filter((l) => !(l.targetType === 'task' && l.targetId === id)),
-      calendarItems: serverDb.calendarItems.map((c) =>
-        c.linkedRecordType === 'task' && c.linkedRecordId === id
-          ? { ...c, linkedRecordType: null, linkedRecordId: null }
-          : c
-      ),
-    };
-    res.json({ ok: true });
-  });
-
-  // Document Delete Restriction (ON DELETE RESTRICT) + RBAC
-  app.delete('/api/documents/:id', requireAuth, requirePermission('records:delete'), (req, res) => {
-    const { id } = req.params;
-    const doc = serverDb.documents.find((d) => d.id === id);
-    if (!doc) {
-      return res.status(404).json({ error: 'الوثيقة غير موجودة.' });
-    }
-    if (doc.renewals.length > 0) {
-      return res.status(409).json({
-        error: `يُمنع الحذف النهائي لوثيقة تحتوي على ${doc.renewals.length} سجل تجديد؛ استخدم الأرشفة.`,
-      });
-    }
-    serverDb = {
-      ...serverDb,
-      documents: serverDb.documents.filter((d) => d.id !== id),
-    };
-    return res.json({ ok: true });
-  });
-
-  // VAT 3A Endpoints (Dedicated VAT RBAC)
-  app.get('/api/vat3a', requireAuth, requirePermission('vat3a:view'), (_req, res) => {
-    res.json({
-      drafts: serverDb.vat3aDrafts,
-      rules: serverDb.preferences.vat3aRules,
+    const parsed = taskItemSchema.safeParse(item);
+    if (!parsed.success) throw new RequestError(400, 'بيانات المهمة غير صالحة.');
+    let created = false;
+    const updated = await changeRecords((repo) => {
+      created = !repo.load().tasks.some((task) => task.id === item.id);
+      repo.upsertTask(parsed.data);
     });
-  });
+    return res.status(created ? 201 : 200).json({ task: updated.state.tasks.find((task) => task.id === item.id) });
+  }));
 
-  app.post('/api/vat3a', requireAuth, requirePermission('vat3a:edit'), (req, res) => {
-    const draft = req.body as Vat3ADraft;
-    if (!draft || !draft.id || !draft.entityName) {
-      return res.status(400).json({ error: 'بيانات مسودة 3A غير مكتملة.' });
-    }
-    const exists = serverDb.vat3aDrafts.some((d) => d.id === draft.id);
-    serverDb = {
-      ...serverDb,
-      vat3aDrafts: exists
-        ? serverDb.vat3aDrafts.map((d) => (d.id === draft.id ? draft : d))
-        : [draft, ...serverDb.vat3aDrafts],
-    };
-    return res.json({ draft });
-  });
+  app.delete('/api/tasks/:id', requireAuth, requirePermission('records:delete'), asyncRoute(async (req, res) => {
+    await changeRecords((repo) => { repo.deleteTask(req.params.id); });
+    res.json({ ok: true });
+  }));
 
-  app.put('/api/vat3a/rules', requireAuth, requirePermission('vat3a:edit'), (req, res) => {
-    const rules = req.body as Vat3ARulesConfig;
-    if (!rules || typeof rules.defaultRatePercent !== 'number') {
-      return res.status(400).json({ error: 'قواعد حساب 3A غير صالحة.' });
-    }
-    serverDb = {
-      ...serverDb,
-      preferences: {
-        ...serverDb.preferences,
-        vat3aRules: rules,
-      },
-    };
-    return res.json({ rules: serverDb.preferences.vat3aRules });
-  });
+  app.delete('/api/documents/:id', requireAuth, requirePermission('records:delete'), asyncRoute(async (req, res) => {
+    await changeRecords((repo) => {
+      if (!repo.load().documents.some((doc) => doc.id === req.params.id)) throw new RequestError(404, 'الوثيقة غير موجودة.');
+      const result = repo.deleteDocument(req.params.id);
+      if (!result.ok) throw new RequestError(409, result.error || 'تعذر حذف الوثيقة.');
+    });
+    res.json({ ok: true });
+  }));
+
+  app.get('/api/vat3a', requireAuth, requirePermission('vat3a:view'), asyncRoute(async (_req, res) => {
+    const { state } = await store.read();
+    res.json({ drafts: state.vat3aDrafts, rules: state.preferences.vat3aRules });
+  }));
+
+  app.post('/api/vat3a', requireAuth, requirePermission('vat3a:edit'), asyncRoute(async (req, res) => {
+    const parsed = vat3ADraftSchema.safeParse(req.body);
+    if (!parsed.success) throw new RequestError(400, 'بيانات مسودة 3A غير مكتملة.');
+    const draft = parsed.data;
+    await changeRecords((repo) => { repo.upsertVat3ADraft(draft); });
+    res.json({ draft });
+  }));
+
+  app.put('/api/vat3a/rules', requireAuth, requirePermission('vat3a:edit'), asyncRoute(async (req, res) => {
+    const parsed = vat3ARulesConfigSchema.safeParse(req.body);
+    if (!parsed.success) throw new RequestError(400, 'قواعد حساب 3A غير صالحة.');
+    await changeRecords((repo) => { repo.updatePreferences({ vat3aRules: parsed.data }); });
+    res.json({ rules: parsed.data });
+  }));
 
   // Report Export Authorization Check
   app.post('/api/reports/export', requireAuth, requirePermission('reports:export'), (req, res) => {
     const user = (req as Request & { authUser?: AuthUser }).authUser!;
-    const { format, rowCount } = req.body as { format?: string; rowCount?: number };
+    const { format, rowCount } = (req.body ?? {}) as { format?: string; rowCount?: number };
     res.json({
       ok: true,
       authorizedBy: user.username,
@@ -582,54 +571,69 @@ export function createServerApp() {
     });
   });
 
-  // Admin Backup & Atomic Restore (Server Mode)
-  app.get('/api/backups/export', requireAuth, requirePermission('backups:export'), (_req, res) => {
-    const envelope = createBackupEnvelope(serverDb, 'server');
+  app.get('/api/backups/export', requireAuth, requirePermission('backups:export'), asyncRoute(async (_req, res) => {
+    const { state } = await store.read();
     res.json({
-      ...envelope,
-      includesAttachments: false,
-      attachmentsNote:
-        'في بيئة الإنتاج المشتركة (هوستنجر)، يُضاف أرشيف المرفقات (/uploads) إلى نسخة قاعدة البيانات من الخادم ضمن صلاحية المدير.',
+      ...createBackupEnvelope(state, 'server'),
+      attachmentsNote: 'تتضمن النسخة سجلات مساحة العمل. تُدار نسخة حسابات الدخول من قاعدة البيانات.',
     });
-  });
+  }));
 
-  app.post('/api/backups/restore', requireAuth, requirePermission('backups:restore'), (req, res) => {
-    const snapshot = structuredClone(serverDb);
-    try {
-      const check = validateBackupFileText(JSON.stringify(req.body));
-      if (!check.ok || !check.envelope) {
-        return res.status(400).json({
-          ok: false,
-          error: check.error || 'فشل التحقق من سلامة ملف النسخة الاحتياطية.',
-        });
-      }
-      const migrated = migrateDatabaseState(check.envelope.payload);
-      serverDb = migrated;
-      return res.json({
-        ok: true,
-        counts: check.counts,
-        restoredAt: new Date().toISOString().slice(0, 19),
-      });
-    } catch (err) {
-      serverDb = snapshot;
-      return res.status(500).json({
-        ok: false,
-        error:
-          err instanceof Error
-            ? `تعذرت الاستعادة (${err.message}) — تم الإبقاء على البيانات الحالية.`
-            : 'تعذرت الاستعادة — تم الإبقاء على البيانات الحالية.',
-      });
+  app.post('/api/backups/restore', requireAuth, requirePermission('backups:restore'), asyncRoute(async (req, res) => {
+    const check = validateBackupFileText(JSON.stringify(req.body));
+    if (!check.ok || !check.envelope) {
+      throw new RequestError(400, check.error || 'فشل التحقق من سلامة ملف النسخة الاحتياطية.');
     }
+    const migrated = migrateDatabaseState(check.envelope.payload);
+    assertRestorableWorkspace(migrated);
+    await store.change((workspace) => { workspace.state = migrated; }, true);
+    res.json({ ok: true, counts: check.counts, restoredAt: new Date().toISOString() });
+  }));
+
+  app.use('/api', (_req, res) => { res.status(404).json({ error: 'المسار المطلوب غير موجود.' }); });
+  app.use('/api', (error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (error instanceof RequestError) return res.status(error.status).json({ error: error.message });
+    const status = (error as { status?: number })?.status;
+    if (status === 400 || status === 413) return res.status(status).json({ error: 'حجم البيانات أو بنيتها غير صالحة.' });
+    console.error('Workspace request failed:', (error as { code?: string })?.code || 'internal error');
+    res.status(503).json({ error: 'تعذر الوصول إلى بيانات مساحة العمل. حاول مجددًا.' });
   });
 
   return app;
 }
 
+async function provisionOwner(store: WorkspaceStore) {
+  if ((await store.users()).some((user) => user.role === 'admin' && user.isActive)) return;
+  const username = process.env.OWNER_USERNAME?.trim().toLowerCase() || '';
+  const displayName = process.env.OWNER_DISPLAY_NAME?.trim() || 'مالك مساحة العمل';
+  const email = process.env.OWNER_EMAIL?.trim() || '';
+  const password = process.env.OWNER_PASSWORD || '';
+  if (username.length < 3 || username.length > 100 || displayName.length > 200 ||
+      email.length > 254 || password.length < 12 || password.length > 256) {
+    throw new Error('Set OWNER_USERNAME and OWNER_PASSWORD (12–256 characters) to provision the first owner.');
+  }
+  const { salt, hash } = hashPasswordScrypt(password);
+  const created = await store.addUser({
+    id: 'srv-admin-01', username, displayName, email, role: 'admin', specialistId: null,
+    passwordSalt: salt, passwordHash: hash, isActive: true, createdAt: new Date().toISOString(),
+  }, true);
+  if (!created && !(await store.users()).some((user) => user.role === 'admin' && user.isActive)) {
+    throw new Error('Shared workspace accounts exist without an active owner.');
+  }
+}
+
 async function startServer() {
-  const app = createServerApp();
   const isProd = process.env.NODE_ENV === 'production';
+  const shared = isProd || process.env.APP_STORAGE === 'mysql';
+  if (shared && (process.env.SESSION_SECRET?.trim().length ?? 0) < 32) {
+    throw new Error('SESSION_SECRET of at least 32 characters is required for shared mode.');
+  }
+  const store = shared ? await openMysqlStore() : createPreviewStore();
+  if (shared) await provisionOwner(store);
+  const app = createServerApp(store);
 
   if (!isProd) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -654,7 +658,7 @@ if (
   pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
 ) {
   startServer().catch((err) => {
-    console.error('Failed to start server:', err);
+    console.error('Failed to start server:', (err as { code?: string })?.code || (err instanceof Error ? err.message : 'unknown error'));
     process.exit(1);
   });
 }

@@ -374,32 +374,18 @@ export interface DataRepository {
   restoreBackupPayload(envelope: BackupEnvelope): DeleteOperationResult;
 }
 
-class LocalStorageDataAdapter implements DataRepository {
-  private readRaw(): AppDatabaseState {
-    if (typeof window === 'undefined') return createSeedDatabase();
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        const seeded = createSeedDatabase();
-        this.save(seeded);
-        return seeded;
-      }
-      const parsed = JSON.parse(raw) as Partial<AppDatabaseState>;
-      return migrateDatabaseState(parsed);
-    } catch {
-      const seeded = createSeedDatabase();
-      this.save(seeded);
-      return seeded;
-    }
-  }
+export class StateDataRepository implements DataRepository {
+  constructor(
+    private readonly readRaw: () => AppDatabaseState,
+    private readonly write: (state: AppDatabaseState) => void
+  ) {}
 
   load(): AppDatabaseState {
     return this.readRaw();
   }
 
   save(state: AppDatabaseState): void {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    this.write(state);
   }
 
   resetToDemo(): AppDatabaseState {
@@ -946,4 +932,23 @@ class LocalStorageDataAdapter implements DataRepository {
   }
 }
 
-export const dataRepository: DataRepository = new LocalStorageDataAdapter();
+const readLocalState = (): AppDatabaseState => {
+  if (typeof window === 'undefined') return createSeedDatabase();
+  const raw = window.localStorage.getItem(STORAGE_KEY);
+  if (raw) {
+    try {
+      return migrateDatabaseState(JSON.parse(raw) as Partial<AppDatabaseState>);
+    } catch {
+      // Replace an unreadable preview state with the demo defaults.
+    }
+  }
+  const seeded = createSeedDatabase();
+  dataRepository.save(seeded);
+  return seeded;
+};
+
+export const dataRepository: DataRepository = new StateDataRepository(readLocalState, (state) => {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+});
