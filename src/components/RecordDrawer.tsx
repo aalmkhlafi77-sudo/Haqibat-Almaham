@@ -126,6 +126,7 @@ export const RecordDrawer: React.FC = () => {
           priority: (prefill.priority as TaskPriority) || 'متوسطة',
           status: 'جديدة',
           dueDate: (prefill.dueDate as string | undefined) ?? today,
+          plannedDate: typeof prefill.plannedDate === 'string' ? prefill.plannedDate : null,
           actualDeliveryDate: '',
           letterNumber: '',
           authorityName: typeof prefill.authorityName === 'string' ? prefill.authorityName : '',
@@ -286,6 +287,7 @@ export const RecordDrawer: React.FC = () => {
         priority: (taskForm.priority as TaskPriority) || 'متوسطة',
         status: (taskForm.status as TaskStatus) || 'جديدة',
         dueDate: taskForm.dueDate,
+        plannedDate: taskForm.plannedDate,
         actualDeliveryDate: taskForm.actualDeliveryDate || null,
         letterNumber: taskForm.letterNumber?.trim() || undefined,
         authorityName: taskForm.authorityName?.trim() || undefined,
@@ -295,7 +297,7 @@ export const RecordDrawer: React.FC = () => {
         sessionId: taskForm.sessionId || null,
         notes: taskForm.notes || '',
         archivedAt: taskForm.archivedAt || null,
-      });
+      }, !activeRecord.id && typeof activeRecord.prefill?.ideaId === 'string' ? activeRecord.prefill.ideaId : undefined);
       setIsDirty(false);
       showToast('تم حفظ المهمة بنجاح.');
       openRecord('task', saved.id);

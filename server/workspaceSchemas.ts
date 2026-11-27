@@ -39,6 +39,7 @@ export const taskItemSchema = z.object({
   priority: taskPrioritySchema,
   status: taskStatusSchema,
   dueDate: text,
+  plannedDate: z.iso.date().nullable().optional(),
   actualDeliveryDate: text.nullable().optional(),
   letterNumber: text.optional(),
   authorityName: text.optional(),
@@ -50,6 +51,19 @@ export const taskItemSchema = z.object({
   archivedAt: text.nullable().optional(),
   createdAt: text,
   updatedAt: text,
+});
+
+export const projectItemSchema = z.object({
+  id, title: text.trim().min(1).max(200),
+  status: z.enum(['مخطط', 'قيد التنفيذ', 'معلق', 'مكتمل']),
+  specialistId: id.nullable(), dueDate: z.iso.date().nullable(), nextStep: text.max(1000), notes: text.max(5000),
+  milestones: z.array(z.object({ id, title: text.trim().min(1).max(200), done: z.boolean() })).max(100),
+  taskIds: z.array(id).max(500), documentIds: z.array(id).max(500), createdAt: text, updatedAt: text,
+}).refine(value => new Set(value.milestones.map(m => m.id)).size === value.milestones.length &&
+  new Set(value.taskIds).size === value.taskIds.length && new Set(value.documentIds).size === value.documentIds.length);
+export const ideaItemSchema = z.object({
+  id, title: text.trim().min(1).max(1000), category: text.max(200), notes: text.max(5000),
+  pinned: z.boolean(), taskId: id.nullable(), projectId: id.nullable(), createdAt: text, updatedAt: text,
 });
 
 export const documentRenewalSchema = z.object({

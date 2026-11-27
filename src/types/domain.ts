@@ -3,6 +3,7 @@ export type ThemeMode = 'light' | 'dark';
 export type NavSection =
   | 'today'
   | 'tasks'
+  | 'planner'
   | 'documents'
   | 'cases'
   | 'calendar'
@@ -69,6 +70,7 @@ export interface TaskItem {
   priority: TaskPriority;
   status: TaskStatus;
   dueDate: string; // YYYY-MM-DD (DATE without time)
+  plannedDate?: string | null;
   actualDeliveryDate?: string | null; // YYYY-MM-DD
   letterNumber?: string;
   authorityName?: string;
@@ -80,6 +82,18 @@ export interface TaskItem {
   archivedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProjectMilestone { id: string; title: string; done: boolean }
+export interface ProjectItem {
+  id: string; title: string; status: 'مخطط' | 'قيد التنفيذ' | 'معلق' | 'مكتمل';
+  specialistId: string | null; dueDate: string | null; nextStep: string; notes: string;
+  milestones: ProjectMilestone[]; taskIds: string[]; documentIds: string[];
+  createdAt: string; updatedAt: string;
+}
+export interface IdeaItem {
+  id: string; title: string; category: string; notes: string; pinned: boolean;
+  taskId: string | null; projectId: string | null; createdAt: string; updatedAt: string;
 }
 
 export interface DocumentRenewal {
@@ -346,6 +360,8 @@ export interface AppDatabaseState {
   specialists: Specialist[];
   documentCategories: DocumentCategoryItem[];
   taskTypes: TaskTypeItem[];
+  projects: ProjectItem[];
+  ideas: IdeaItem[];
   tasks: TaskItem[];
   documents: DocumentItem[];
   cases: CaseItem[];

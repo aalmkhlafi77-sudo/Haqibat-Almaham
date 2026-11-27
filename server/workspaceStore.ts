@@ -103,7 +103,7 @@ export async function openMysqlStore(): Promise<WorkspaceStore> {
     const revision = Number(row.revision);
     if (!Number.isSafeInteger(revision)) throw new Error('Invalid workspace revision.');
     const state: AppDatabaseState = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
-    return { revision, state };
+    return { revision, state: { ...state, projects: state.projects ?? [], ideas: state.ideas ?? [] } };
   };
 
   try {
