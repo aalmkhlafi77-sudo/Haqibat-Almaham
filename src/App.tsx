@@ -15,6 +15,7 @@ import { ReportsView } from './components/ReportsView';
 import { SettingsView } from './components/SettingsView';
 import { ShareModal } from './components/ShareModal';
 import { SpecialistsView } from './components/SpecialistsView';
+import { PlannerView } from './components/PlannerView';
 import { TasksView } from './components/TasksView';
 import { TodayView } from './components/TodayView';
 import { Vat3AView } from './components/Vat3AView';
@@ -54,6 +55,7 @@ const MainRouter: React.FC = () => {
         <div role="status" className="mb-3 text-xs">جارٍ الحفظ على الخادم…</div>
       )}
       {activeNav === 'today' && <TodayView />}
+      {activeNav === 'planner' && <PlannerView />}
       {activeNav === 'tasks' && <TasksView />}
       {activeNav === 'documents' && <DocumentsView />}
       {activeNav === 'cases' && <CasesPoasView />}

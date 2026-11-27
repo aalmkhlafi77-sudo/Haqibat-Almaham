@@ -18,6 +18,8 @@ import {
   DocumentItem,
   DocumentRenewal,
   LabelItem,
+  ProjectItem,
+  IdeaItem,
   PoaItem,
   SessionItem,
   ShareLog,
@@ -287,6 +289,8 @@ export function migrateDatabaseState(
     specialists: parsed.specialists ?? fallback.specialists,
     documentCategories: categories,
     taskTypes,
+    projects: Array.isArray(parsed.projects) ? parsed.projects : [],
+    ideas: Array.isArray(parsed.ideas) ? parsed.ideas : [],
     tasks: migratedTasks,
     documents: migratedDocs,
     cases: parsed.cases ?? fallback.cases,
@@ -348,6 +352,12 @@ export interface DataRepository {
     typeId: string,
     replacementTypeId: string
   ): DeleteOperationResult;
+  upsertProject(project: ProjectItem): AppDatabaseState;
+  deleteProject(id: string): AppDatabaseState;
+  upsertIdea(idea: IdeaItem): AppDatabaseState;
+  deleteIdea(id: string): AppDatabaseState;
+  createTaskFromIdea(task: TaskItem, ideaId: string): AppDatabaseState;
+  createProjectFromIdea(project: ProjectItem, ideaId: string): AppDatabaseState;
   upsertTask(task: TaskItem): AppDatabaseState;
   deleteTask(taskId: string): AppDatabaseState;
   upsertDocument(doc: DocumentItem): AppDatabaseState;
@@ -537,6 +547,57 @@ export class StateDataRepository implements DataRepository {
     return { ok: true, state: next };
   }
 
+  upsertProject(project: ProjectItem): AppDatabaseState {
+    const state = this.readRaw();
+    const projects = state.projects.some(p => p.id === project.id)
+      ? state.projects.map(p => p.id === project.id ? project : p) : [project, ...state.projects];
+    const next = { ...state, projects };
+    this.save(next);
+    return next;
+  }
+
+  deleteProject(id: string): AppDatabaseState {
+    const state = this.readRaw();
+    const next = { ...state, projects: state.projects.filter(p => p.id !== id),
+      ideas: state.ideas.map(idea => idea.projectId === id ? { ...idea, projectId: null } : idea) };
+    this.save(next);
+    return next;
+  }
+
+  upsertIdea(idea: IdeaItem): AppDatabaseState {
+    const state = this.readRaw();
+    const ideas = state.ideas.some(i => i.id === idea.id)
+      ? state.ideas.map(i => i.id === idea.id ? idea : i) : [idea, ...state.ideas];
+    const next = { ...state, ideas };
+    this.save(next);
+    return next;
+  }
+
+  deleteIdea(id: string): AppDatabaseState {
+    const state = this.readRaw();
+    const next = { ...state, ideas: state.ideas.filter(i => i.id !== id) };
+    this.save(next);
+    return next;
+  }
+
+  createTaskFromIdea(task: TaskItem, ideaId: string): AppDatabaseState {
+    const state = this.readRaw();
+    const idea = state.ideas.find(i => i.id === ideaId);
+    if (!idea || idea.taskId || state.tasks.some(t => t.id === task.id)) throw new Error('تعذر تحويل الفكرة إلى مهمة.');
+    const next = { ...state, tasks: [task, ...state.tasks], ideas: state.ideas.map(i => i.id === ideaId ? { ...i, taskId: task.id, updatedAt: task.updatedAt } : i) };
+    this.save(next);
+    return next;
+  }
+
+  createProjectFromIdea(project: ProjectItem, ideaId: string): AppDatabaseState {
+    const state = this.readRaw();
+    const idea = state.ideas.find(i => i.id === ideaId);
+    if (!idea || idea.projectId || state.projects.some(p => p.id === project.id)) throw new Error('تعذر تحويل الفكرة إلى مشروع.');
+    const next = { ...state, projects: [project, ...state.projects], ideas: state.ideas.map(i => i.id === ideaId ? { ...i, projectId: project.id, updatedAt: project.updatedAt } : i) };
+    this.save(next);
+    return next;
+  }
+
   upsertTask(task: TaskItem): AppDatabaseState {
     const state = this.readRaw();
     const tt = state.taskTypes.find((x) => x.id === task.typeId);
@@ -558,6 +619,8 @@ export class StateDataRepository implements DataRepository {
     const next: AppDatabaseState = {
       ...state,
       tasks: state.tasks.filter((t) => t.id !== taskId),
+      projects: state.projects.map(p => ({ ...p, taskIds: p.taskIds.filter(id => id !== taskId) })),
+      ideas: state.ideas.map(idea => idea.taskId === taskId ? { ...idea, taskId: null } : idea),
       labels: state.labels.filter(
         (l) => !(l.targetType === 'task' && l.targetId === taskId)
       ),
@@ -633,6 +696,7 @@ export class StateDataRepository implements DataRepository {
     const next: AppDatabaseState = {
       ...state,
       documents: state.documents.filter((d) => d.id !== documentId),
+      projects: state.projects.map(p => ({ ...p, documentIds: p.documentIds.filter(id => id !== documentId) })),
       tasks: state.tasks.map((t) =>
         t.documentId === documentId ? { ...t, documentId: null } : t
       ),
@@ -811,6 +875,7 @@ export class StateDataRepository implements DataRepository {
     const next: AppDatabaseState = {
       ...state,
       specialists: state.specialists.filter((s) => s.id !== specialistId),
+      projects: state.projects.map(p => p.specialistId === specialistId ? { ...p, specialistId: null } : p),
       tasks: state.tasks.map((t) =>
         t.specialistId === specialistId ? { ...t, specialistId: null } : t
       ),

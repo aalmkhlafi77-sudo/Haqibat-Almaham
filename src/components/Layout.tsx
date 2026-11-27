@@ -373,6 +373,12 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           accentClass: 'text-blue-600 dark:text-blue-400',
         },
         {
+          id: 'planner',
+          label: 'المخطط والمشاريع',
+          icon: <CalendarDays className="w-4 h-4" />,
+          accentClass: 'text-emerald-600 dark:text-emerald-400',
+        },
+        {
           id: 'tasks',
           label: 'المهام',
           icon: <CheckSquare className="w-4 h-4" />,

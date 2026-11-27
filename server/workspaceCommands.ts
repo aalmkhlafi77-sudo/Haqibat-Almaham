@@ -57,6 +57,35 @@ const commands = {
     return repo.upsertTaskType(item);
   }),
   deleteTaskType: command(categoryRemove, z.tuple([schema.id, schema.id]), (repo, args) => repo.deleteTaskType(...args)),
+  upsertProject: command(write, z.tuple([schema.projectItemSchema]), (repo, [item]) => {
+    const state = repo.load();
+    requireLink(state.specialists, item.specialistId);
+    item.taskIds.forEach(id => requireLink(state.tasks, id));
+    item.documentIds.forEach(id => requireLink(state.documents, id));
+    return repo.upsertProject(item);
+  }),
+  deleteProject: command(remove, oneId, (repo, [id]) => repo.deleteProject(id)),
+  upsertIdea: command(write, z.tuple([schema.ideaItemSchema]), (repo, [item]) => {
+    const state = repo.load();
+    requireLink(state.tasks, item.taskId);
+    requireLink(state.projects, item.projectId);
+    return repo.upsertIdea(item);
+  }),
+  deleteIdea: command(remove, oneId, (repo, [id]) => repo.deleteIdea(id)),
+  createTaskFromIdea: command(write, z.tuple([schema.taskItemSchema, schema.id]), (repo, [item, ideaId]) => {
+    const state = repo.load();
+    const idea = state.ideas.find(i => i.id === ideaId);
+    if (!idea || idea.taskId || state.tasks.some(t => t.id === item.id)) throw new RequestError(409, 'الفكرة غير متاحة أو مرتبطة بمهمة بالفعل.');
+    requireLink(state.taskTypes, item.typeId); requireLink(state.documents, item.documentId); requireLink(state.cases, item.caseId); requireLink(state.sessions, item.sessionId); requireLink(state.specialists, item.specialistId);
+    return repo.createTaskFromIdea(item, ideaId);
+  }),
+  createProjectFromIdea: command(write, z.tuple([schema.projectItemSchema, schema.id]), (repo, [item, ideaId]) => {
+    const state = repo.load();
+    const idea = state.ideas.find(i => i.id === ideaId);
+    if (!idea || idea.projectId || state.projects.some(p => p.id === item.id)) throw new RequestError(409, 'الفكرة غير متاحة أو مرتبطة بمشروع بالفعل.');
+    requireLink(state.specialists, item.specialistId); item.taskIds.forEach(id => requireLink(state.tasks, id)); item.documentIds.forEach(id => requireLink(state.documents, id));
+    return repo.createProjectFromIdea(item, ideaId);
+  }),
   upsertTask: command(write, z.tuple([schema.taskItemSchema]), (repo, [item]) => {
     const state = repo.load();
     requireLink(state.taskTypes, item.typeId);
@@ -125,6 +154,8 @@ const workspaceCollections = {
   specialists: schema.specialistSchema,
   documentCategories: schema.documentCategoryItemSchema,
   taskTypes: schema.taskTypeItemSchema,
+  projects: schema.projectItemSchema,
+  ideas: schema.ideaItemSchema,
   tasks: schema.taskItemSchema,
   documents: schema.documentItemSchema,
   cases: schema.caseItemSchema,

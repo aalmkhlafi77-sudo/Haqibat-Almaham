@@ -39,6 +39,8 @@ import {
   DocumentRenewal,
   IntegrationSettings,
   LabelItem,
+  ProjectItem,
+  IdeaItem,
   NavSection,
   PendingDeepLink,
   PoaItem,
@@ -136,7 +138,11 @@ interface AppContextValue {
     linkedTasksCount: number;
     linkedRenewalTasksCount: number;
   };
-  saveTask: (task: Omit<TaskItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }) => TaskItem;
+  saveProject: (project: ProjectItem, ideaId?: string) => void;
+  deleteProject: (id: string) => void;
+  saveIdea: (idea: IdeaItem) => void;
+  deleteIdea: (id: string) => void;
+  saveTask: (task: Omit<TaskItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }, ideaId?: string) => TaskItem;
   deleteTask: (id: string) => void;
   saveDocument: (doc: Omit<DocumentItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId' | 'renewals'> & { id?: string; renewals?: DocumentRenewal[] }) => DocumentItem;
   recordDocumentRenewal: (documentId: string, renewal: Omit<DocumentRenewal, 'id' | 'documentId'>) => void;
@@ -758,12 +764,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     linkedRenewalTasksCount: db.tasks.filter((t) => t.typeId === typeId && !!t.documentId).length,
   });
 
+  const saveProject = (project: ProjectItem, ideaId?: string) => {
+    if (!hasPermission(currentUser, 'records:write')) return;
+    setDb(ideaId ? persist('createProjectFromIdea', project, ideaId) : persist('upsertProject', project));
+  };
+  const deleteProject = (id: string) => {
+    if (!hasPermission(currentUser, 'records:delete')) return;
+    setDb(persist('deleteProject', id));
+  };
+  const saveIdea = (idea: IdeaItem) => {
+    if (!hasPermission(currentUser, 'records:write')) return;
+    setDb(persist('upsertIdea', idea));
+  };
+  const deleteIdea = (id: string) => {
+    if (!hasPermission(currentUser, 'records:delete')) return;
+    setDb(persist('deleteIdea', id));
+  };
+
   const saveTask = (
-    input: Omit<TaskItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }
+    input: Omit<TaskItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }, ideaId?: string
   ): TaskItem => {
     const existing = input.id ? db.tasks.find((t) => t.id === input.id) : undefined;
     const item: TaskItem = {
       ...input,
+      plannedDate: input.plannedDate === undefined ? existing?.plannedDate : input.plannedDate,
       id: existing?.id ?? generateId('task'),
       orgId: existing?.orgId ?? 'org-01',
       createdAt: existing?.createdAt ?? nowIso(),
@@ -773,7 +797,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية تعديل المهام.');
       return existing ?? item;
     }
-    setDb(persist('upsertTask', item));
+    setDb(ideaId ? persist('createTaskFromIdea', item, ideaId) : persist('upsertTask', item));
     return item;
   };
 
@@ -1414,6 +1438,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         saveTaskType,
         deleteTaskType,
         getTaskTypeDeleteImpact,
+        saveProject,
+        deleteProject,
+        saveIdea,
+        deleteIdea,
         saveTask,
         deleteTask,
         saveDocument,
