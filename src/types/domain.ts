@@ -1,3 +1,5 @@
+import type { RecurrenceSeries } from '../domain/recurrenceEngine';
+
 export type ThemeMode = 'light' | 'dark';
 
 export type NavSection =
@@ -71,6 +73,8 @@ export interface TaskItem {
   status: TaskStatus;
   dueDate: string; // YYYY-MM-DD (DATE without time)
   plannedDate?: string | null;
+  recurrenceSeriesId?: string | null;
+  recurrenceIndex?: number | null;
   actualDeliveryDate?: string | null; // YYYY-MM-DD
   letterNumber?: string;
   authorityName?: string;
@@ -181,6 +185,8 @@ export interface PoaItem {
 export type CalendarItemKind = 'حدث' | 'تذكير';
 
 export interface CalendarItem {
+  recurrenceSeriesId?: string | null;
+  recurrenceIndex?: number | null;
   id: string;
   orgId: string;
   kind: CalendarItemKind;
@@ -360,6 +366,7 @@ export interface AppDatabaseState {
   specialists: Specialist[];
   documentCategories: DocumentCategoryItem[];
   taskTypes: TaskTypeItem[];
+  recurrenceSeries: RecurrenceSeries[];
   projects: ProjectItem[];
   ideas: IdeaItem[];
   tasks: TaskItem[];

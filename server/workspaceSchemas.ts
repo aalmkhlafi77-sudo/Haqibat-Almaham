@@ -40,6 +40,8 @@ export const taskItemSchema = z.object({
   status: taskStatusSchema,
   dueDate: text,
   plannedDate: z.iso.date().nullable().optional(),
+  recurrenceSeriesId: id.nullable().optional(),
+  recurrenceIndex: z.number().int().nonnegative().nullable().optional(),
   actualDeliveryDate: text.nullable().optional(),
   letterNumber: text.optional(),
   authorityName: text.optional(),
@@ -151,6 +153,8 @@ const calendarItemKindSchema = z.enum(["حدث", "تذكير"]);
 const recordTypeSchema = z.enum(["task", "document", "case", "session", "poa", "calendar_item"]);
 
 export const calendarItemSchema = z.object({
+  recurrenceSeriesId: id.nullable().optional(),
+  recurrenceIndex: z.number().int().nonnegative().nullable().optional(),
   id: id,
   orgId: id,
   kind: calendarItemKindSchema,
@@ -270,3 +274,8 @@ export const integrationSettingsSchema = z.object({
 export const urgentAlertDaysSchema = z.union([z.literal(3), z.literal(5)]);
 
 export const urgentAlertMotionModeSchema = z.enum(["repeat_5s", "continuous", "strong_shake"]);
+
+export const recurrenceSeriesSchema = z.discriminatedUnion('kind', [
+  z.object({ id: id.max(48), kind: z.literal('task'), template: taskItemSchema, frequency: z.enum(['weekly', 'fortnightly', 'monthly', 'yearly']), anchor: z.iso.date(), until: z.iso.date().nullable(), active: z.boolean(), nextIndex: z.number().int().min(0).max(1000000), reminderDays: z.number().int().min(0).max(365) }),
+  z.object({ id: id.max(48), kind: z.literal('calendar_item'), template: calendarItemSchema, frequency: z.enum(['weekly', 'fortnightly', 'monthly', 'yearly']), anchor: z.iso.date(), until: z.iso.date().nullable(), active: z.boolean(), nextIndex: z.number().int().min(0).max(1000000), reminderDays: z.number().int().min(0).max(365) }),
+]).refine(s => !s.until || s.until >= s.anchor);

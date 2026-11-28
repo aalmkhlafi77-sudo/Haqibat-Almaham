@@ -35,13 +35,13 @@ export function generateOccurrences(series: RecurrenceSeries, cutoff: string, no
     const id = `rec-${series.id}-${index}`;
     if (series.kind === 'task') {
       return { seriesId: series.id, index, date, id, kind: 'task', record: {
-        ...series.template, id, dueDate: date, plannedDate: null, status: 'جديدة',
+        ...series.template, id, recurrenceSeriesId: series.id, recurrenceIndex: index, dueDate: date, plannedDate: null, status: 'جديدة',
         actualDeliveryDate: null, archivedAt: null, createdAt: now, updatedAt: now,
       } };
     }
     const time = series.template.scheduledAt.slice(10);
     return { seriesId: series.id, index, date, id, kind: 'calendar_item', record: {
-      ...series.template, id, scheduledAt: `${date}${time}`, isDone: false, createdAt: now, updatedAt: now,
+      ...series.template, id, recurrenceSeriesId: series.id, recurrenceIndex: index, scheduledAt: `${date}${time}`, isDone: false, createdAt: now, updatedAt: now,
     } };
   });
   return { series: { ...series, nextIndex: batch.nextIndex }, occurrences, hasMore: batch.hasMore };

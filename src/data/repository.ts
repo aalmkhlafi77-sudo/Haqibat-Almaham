@@ -289,6 +289,7 @@ export function migrateDatabaseState(
     specialists: parsed.specialists ?? fallback.specialists,
     documentCategories: categories,
     taskTypes,
+    recurrenceSeries: Array.isArray(parsed.recurrenceSeries) ? parsed.recurrenceSeries : [],
     projects: Array.isArray(parsed.projects) ? parsed.projects : [],
     ideas: Array.isArray(parsed.ideas) ? parsed.ideas : [],
     tasks: migratedTasks,

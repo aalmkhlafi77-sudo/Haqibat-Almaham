@@ -154,6 +154,7 @@ const workspaceCollections = {
   specialists: schema.specialistSchema,
   documentCategories: schema.documentCategoryItemSchema,
   taskTypes: schema.taskTypeItemSchema,
+  recurrenceSeries: schema.recurrenceSeriesSchema,
   projects: schema.projectItemSchema,
   ideas: schema.ideaItemSchema,
   tasks: schema.taskItemSchema,

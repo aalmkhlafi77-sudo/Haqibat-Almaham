@@ -84,6 +84,7 @@ export function createEmptyDatabase(): AppDatabaseState {
     specialists: [],
     documentCategories: [],
     taskTypes: buildInitialTaskTypes(),
+    recurrenceSeries: [],
     projects: [],
     ideas: [],
     tasks: [],
@@ -436,6 +437,7 @@ export function createSeedDatabase(): AppDatabaseState {
         updatedAt: `${addDaysISO(today, -360)}T12:00:00`,
       },
     ],
+    recurrenceSeries: [],
     projects: [],
     ideas: [],
     tasks: [
