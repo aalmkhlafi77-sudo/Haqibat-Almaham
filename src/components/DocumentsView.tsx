@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { FileText, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Download, FileText, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { resolveDocumentCategoryName } from '../data/repository';
 import {
@@ -12,6 +12,7 @@ import {
 import { scoreArabicSearchMatch } from '../domain/searchUtils';
 import { DocumentCategoryFilter } from '../types/domain';
 import { StatusBadge } from './StatusBadge';
+import { downloadDocumentsExcel } from '../domain/documentExport';
 
 const CATEGORIES: DocumentCategoryFilter[] = [
   'الكل',
@@ -25,6 +26,8 @@ const CATEGORIES: DocumentCategoryFilter[] = [
 export const DocumentsView: React.FC = () => {
   const {
     db,
+    authMode,
+    showToast,
     hasPerm,
     updateDocumentFilters,
     setDocumentWarningDays,
@@ -32,6 +35,8 @@ export const DocumentsView: React.FC = () => {
     requestDeleteRecord,
   } = useApp();
   const canWriteRecords = hasPerm('records:write');
+  const canExport = hasPerm('reports:export');
+  const [exporting, setExporting] = useState(false);
   const canDeleteRecords = hasPerm('records:delete');
   const filters = db.preferences.documentFilters;
   const warningDays = db.preferences.documentWarningDays;
@@ -126,6 +131,21 @@ export const DocumentsView: React.FC = () => {
       .map(({ doc, categoryName, health }) => ({ doc, categoryName, health }));
   }, [evaluatedDocs, filters, db.specialists]);
 
+  const exportDocuments = async (scope: 'all' | 'filtered') => {
+    if (!canExport || exporting) return;
+    const items = scope === 'all' ? db.documents : filteredDocs.map(item => item.doc);
+    setExporting(true);
+    try {
+      if (authMode === 'server') {
+        const response = await fetch('/api/reports/export', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'}, body:JSON.stringify({format:'excel',rowCount:items.length}) });
+        if (!response.ok) throw new Error('تعذر التحقق من صلاحية التصدير.');
+      }
+      downloadDocumentsExcel(items, db.documentCategories, db.specialists, today, warningDays, scope === 'all' ? 'كل الوثائق بما فيها المؤرشفة' : 'الوثائق المطابقة لفلاتر الشاشة');
+      showToast(`تم تجهيز ${items.length} وثيقة للتنزيل.`);
+    } catch { showToast('تعذر تصدير الوثائق؛ تحقق من الاتصال والصلاحية.'); }
+    finally { setExporting(false); }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -139,6 +159,11 @@ export const DocumentsView: React.FC = () => {
           </p>
         </div>
 
+        <div className="flex flex-wrap gap-2">
+        {canExport && <>
+          <button type="button" disabled={exporting || filteredDocs.length === 0} onClick={() => void exportDocuments('filtered')} className="inline-flex items-center gap-1.5 rounded-xl border border-teal-500 px-3 py-2 text-xs font-semibold text-teal-700 disabled:opacity-50 dark:text-teal-300"><Download className="w-4 h-4" />تصدير المطابق ({filteredDocs.length})</button>
+          <button type="button" disabled={exporting || db.documents.length === 0} onClick={() => void exportDocuments('all')} className="inline-flex items-center gap-1.5 rounded-xl border border-teal-500 px-3 py-2 text-xs font-semibold text-teal-700 disabled:opacity-50 dark:text-teal-300"><Download className="w-4 h-4" />تصدير الكل ({db.documents.length})</button>
+        </>}
         {canWriteRecords && (
           <button
             type="button"
@@ -149,7 +174,9 @@ export const DocumentsView: React.FC = () => {
             <span>وثيقة جديدة</span>
           </button>
         )}
+        </div>
       </div>
+      {canExport && <p className="text-xs text-slate-500 dark:text-slate-400">التصدير بصيغة Excel ويشمل بيانات الوثائق وسجل التجديدات؛ يشمل خيار الكل الوثائق المؤرشفة.</p>}
 
       {/* Category Filter Tabs + Warning Window Setting */}
       <div className="glass-panel rounded-xl p-3.5 space-y-3">
