@@ -40,6 +40,7 @@ export interface ReportExportSnapshot {
     departmentName: string;
     operationType: string;
     statusFilter: string;
+    documentCategory?: string;
   };
   summary: {
     totalCount: number;
@@ -111,6 +112,7 @@ export function buildReportExcelBuffer(snapshot: ReportExportSnapshot): ArrayBuf
       'الحالة',
       snapshot.filters.statusFilter,
     ],
+    ['تصنيف الوثائق', snapshot.filters.documentCategory || 'الكل'],
     [],
     ['ملخص النتائج (مطابق للشاشة)'],
     [
@@ -253,9 +255,10 @@ export async function buildReportPdfBlob(snapshot: ReportExportSnapshot): Promis
   ctx.fillStyle = '#334155';
   ctx.font = '11px Cairo, "IBM Plex Sans Arabic", sans-serif';
   ctx.fillText(
-    `الفلاتر: المختص (${snapshot.filters.specialistName})  ·  القسم (${snapshot.filters.departmentName})  ·  العملية (${snapshot.filters.operationType})  ·  الحالة (${snapshot.filters.statusFilter})`,
+    `الفلاتر: المختص (${snapshot.filters.specialistName})  ·  القسم (${snapshot.filters.departmentName})  ·  العملية (${snapshot.filters.operationType})  ·  الحالة (${snapshot.filters.statusFilter})  ·  تصنيف الوثائق (${snapshot.filters.documentCategory || 'الكل'})`,
     width - 46,
-    150
+    150,
+    width - 92
   );
 
   // 4 KPI Boxes (from right to left in RTL)
@@ -554,7 +557,7 @@ export function buildReportShareSummaryText(snapshot: ReportExportSnapshot): str
   return [
     'تقرير العمليات والإحصاءات — حقيبة المهام',
     `الفترة: ${formatPeriodText(snapshot)}`,
-    `الفلاتر: المختص (${snapshot.filters.specialistName}) · القسم (${snapshot.filters.departmentName}) · العملية (${snapshot.filters.operationType}) · الحالة (${snapshot.filters.statusFilter})`,
+    `الفلاتر: المختص (${snapshot.filters.specialistName}) · القسم (${snapshot.filters.departmentName}) · العملية (${snapshot.filters.operationType}) · الحالة (${snapshot.filters.statusFilter}) · تصنيف الوثائق (${snapshot.filters.documentCategory || 'الكل'})`,
     `إجمالي السجلات المطابقة: ${toEnglishDigits(String(snapshot.summary.totalCount))}`,
     `مكتملة / منعقدة / سارية: ${toEnglishDigits(String(snapshot.summary.doneCount))}`,
     `متأخرة / منتهية / قريبة: ${toEnglishDigits(String(snapshot.summary.urgentCount))}`,

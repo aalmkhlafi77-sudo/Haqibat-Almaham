@@ -27,6 +27,9 @@ import {
   type ReportExportSnapshot,
 } from '../domain/reportExport';
 import { RecordType } from '../types/domain';
+import { resolveDocumentCategoryName } from '../data/repository';
+import { downloadDocumentsExcel } from '../domain/documentExport';
+import { matchesReportDocumentCategory } from '../domain/reportCategory';
 import { ArabicDatePicker } from './ArabicDatePicker';
 import { StatusBadge } from './StatusBadge';
 
@@ -42,6 +45,8 @@ interface NormalizedReportRow {
   specialistId: string | null;
   specialistName: string;
   departmentName: string;
+  categoryId?: string | null;
+  categoryName?: string;
   isDone: boolean;
   isUrgentOrOverdue: boolean;
 }
@@ -82,8 +87,10 @@ export const ReportsView: React.FC = () => {
   const [departmentName, setDepartmentName] = useState<string>('الكل');
   const [operationType, setOperationType] = useState<OperationTypeFilter>('الكل');
   const [statusFilter, setStatusFilter] = useState<string>('الكل');
+  const [documentCategory, setDocumentCategory] = useState('الكل');
   const [barMode, setBarMode] = useState<'specialist' | 'month'>('specialist');
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+  const [documentsExporting, setDocumentsExporting] = useState(false);
   const [exportingFormat, setExportingFormat] = useState<'pdf' | 'excel' | null>(null);
 
   useEffect(() => {
@@ -92,6 +99,7 @@ export const ReportsView: React.FC = () => {
     setToDate(assistantHandoff.toDate || '');
     setSpecialistId(assistantHandoff.specialistId || 'الكل');
     setDepartmentName('الكل');
+    setDocumentCategory('الكل');
     setOperationType('الكل');
     setStatusFilter('الكل');
     setAssistantHandoff(null);
@@ -133,6 +141,8 @@ export const ReportsView: React.FC = () => {
         recordType: 'document',
         title: d.name,
         operationType: 'وثائق',
+        categoryId: d.categoryId,
+        categoryName: resolveDocumentCategoryName(d, db.documentCategories),
         statusLabel,
         dateISO: d.expiryDate || d.issueDate || d.createdAt.slice(0, 10),
         specialistId: d.specialistId,
@@ -205,7 +215,7 @@ export const ReportsView: React.FC = () => {
     }
 
     return rows.sort((a, b) => a.dateISO.localeCompare(b.dateISO));
-  }, [db.tasks, db.documents, db.sessions, db.poas, db.calendarItems, db.specialists, today, warningDays]);
+  }, [db.tasks, db.documents, db.sessions, db.poas, db.calendarItems, db.specialists, db.documentCategories, today, warningDays]);
 
   const departmentOptions = useMemo(
     () => Array.from(new Set(allRecords.map((r) => r.departmentName))),
@@ -225,9 +235,10 @@ export const ReportsView: React.FC = () => {
       if (departmentName !== 'الكل' && r.departmentName !== departmentName) return false;
       if (operationType !== 'الكل' && r.operationType !== operationType) return false;
       if (statusFilter !== 'الكل' && r.statusLabel !== statusFilter) return false;
+      if (!matchesReportDocumentCategory(r, documentCategory)) return false;
       return true;
     });
-  }, [allRecords, fromDate, toDate, specialistId, departmentName, operationType, statusFilter]);
+  }, [allRecords, fromDate, toDate, specialistId, departmentName, operationType, statusFilter, documentCategory]);
 
   const totalCount = filteredRecords.length;
   const doneCount = filteredRecords.filter((r) => r.isDone).length;
@@ -291,6 +302,7 @@ export const ReportsView: React.FC = () => {
     setToDate('');
     setSpecialistId('الكل');
     setDepartmentName('الكل');
+    setDocumentCategory('الكل');
     setOperationType('الكل');
     setStatusFilter('الكل');
   };
@@ -312,6 +324,7 @@ export const ReportsView: React.FC = () => {
         departmentName,
         operationType,
         statusFilter,
+        documentCategory: documentCategory === 'الكل' ? 'الكل' : documentCategory === '__uncategorized__' ? 'غير مصنفة' : db.documentCategories.find(c => c.id === documentCategory)?.name || 'غير معروف',
       },
       summary: {
         totalCount,
@@ -353,6 +366,19 @@ export const ReportsView: React.FC = () => {
       showToast('تعذر التحقق من صلاحية التصدير على الخادم.');
       return false;
     }
+  };
+
+  const matchingDocumentIds = new Set(filteredRecords.filter(r => r.recordType === 'document').map(r => r.id));
+  const exportDocumentRecords = async (scope: 'all' | 'filtered') => {
+    if (!canExport || documentsExporting) return;
+    const items = scope === 'all' ? db.documents : db.documents.filter(d => matchingDocumentIds.has(d.id));
+    setDocumentsExporting(true);
+    try {
+      if (!await verifyServerExportPermission('excel', items.length)) return;
+      downloadDocumentsExcel(items, db.documentCategories, db.specialists, today, warningDays, scope === 'all' ? 'كل الوثائق بما فيها المؤرشفة' : 'الوثائق المطابقة لفلاتر التقرير');
+      showToast(`تم تجهيز ${items.length} وثيقة للتنزيل.`);
+    } catch { showToast('تعذر تصدير سجلات الوثائق.'); }
+    finally { setDocumentsExporting(false); }
   };
 
   const handleDownloadPdf = async () => {
@@ -506,7 +532,7 @@ export const ReportsView: React.FC = () => {
       <div className="glass-panel rounded-xl p-4 space-y-3">
         <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-200">
           <Filter className="w-3.5 h-3.5 text-sky-500" />
-          <span>تصفية التقارير (الفترة، المختص، القسم، نوع العملية، الحالة)</span>
+          <span>تصفية التقارير (الفترة، المختص، القسم، نوع العملية، الحالة، تصنيف الوثائق)</span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5">
           <div>
@@ -575,7 +601,7 @@ export const ReportsView: React.FC = () => {
             </label>
             <select
               value={operationType}
-              onChange={(e) => setOperationType(e.target.value as OperationTypeFilter)}
+              onChange={(e) => { const value = e.target.value as OperationTypeFilter; setOperationType(value); if (value !== 'وثائق') setDocumentCategory('الكل'); }}
               className="w-full h-9 px-2.5 rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] text-xs"
             >
               <option value="الكل">الكل</option>
@@ -584,6 +610,13 @@ export const ReportsView: React.FC = () => {
               <option value="جلسات">جلسات</option>
               <option value="وكالات">وكالات</option>
               <option value="تقويم">أحداث وتذكيرات</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="report-document-category" className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">تصنيف الوثائق والتراخيص</label>
+            <select id="report-document-category" value={documentCategory} onChange={e => { setDocumentCategory(e.target.value); if (e.target.value !== 'الكل') setOperationType('وثائق'); }} className="w-full h-9 px-2.5 rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-[#14161b] text-xs">
+              <option value="الكل">كل التصنيفات</option><option value="__uncategorized__">غير مصنفة</option>
+              {db.documentCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           <div>
@@ -605,6 +638,15 @@ export const ReportsView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {canExport && <section className="glass-panel rounded-xl p-4 space-y-2" aria-label="تصدير سجلات الوثائق والتراخيص">
+        <p className="text-sm font-semibold">تصدير بيانات الوثائق والتراخيص مع سجل التجديدات</p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" disabled={documentsExporting || matchingDocumentIds.size === 0} onClick={() => void exportDocumentRecords('filtered')} className="rounded-xl border border-teal-500 px-3 py-2 text-xs font-semibold text-teal-700 disabled:opacity-50 dark:text-teal-300">تصدير الوثائق المطابقة للفلاتر ({matchingDocumentIds.size})</button>
+          <button type="button" disabled={documentsExporting || db.documents.length === 0} onClick={() => void exportDocumentRecords('all')} className="rounded-xl border border-teal-500 px-3 py-2 text-xs font-semibold text-teal-700 disabled:opacity-50 dark:text-teal-300">تصدير كل الوثائق ({db.documents.length})</button>
+        </div>
+        <p className="text-xs text-slate-500 dark:text-slate-400">ملف Excel يشمل كل الحقول وسجل التجديدات؛ خيار الكل يشمل الوثائق المؤرشفة.</p>
+      </section>}
 
       {/* KPI Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
