@@ -96,6 +96,22 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       }
     }
 
+    for (const t of db.tasks) {
+      if (t.archivedAt || t.status === 'مكتملة' || t.status === 'ملغاة' || !t.recurrenceSeriesId || t.dueDate < today) continue;
+      const series = db.recurrenceSeries.find(s => s.id === t.recurrenceSeriesId);
+      if (!series) continue;
+      const days = Math.round((Date.parse(t.dueDate) - Date.parse(today)) / 86400000);
+      if (days <= series.reminderDays) list.push({ id: `alert-rec-task-${t.id}`, type: 'task', recordId: t.id, title: t.title, subtitle: formatDisplayDate(t.dueDate, db.preferences.showHijri), badge: days === 0 ? 'مهمة متكررة اليوم' : `مهمة متكررة خلال ${days} يوم`, tone: 'warning' });
+    }
+    for (const c of db.calendarItems) {
+      if (c.isDone || !c.recurrenceSeriesId) continue;
+      const series = db.recurrenceSeries.find(s => s.id === c.recurrenceSeriesId);
+      if (!series) continue;
+      const date = c.scheduledAt.slice(0,10);
+      const days = Math.round((Date.parse(date) - Date.parse(today)) / 86400000);
+      if (days <= series.reminderDays) list.push({ id: `alert-rec-calendar-${c.id}`, type: 'calendar_item', recordId: c.id, title: c.title, subtitle: formatDateTime(c.scheduledAt, db.preferences.showHijri), badge: days < 0 ? 'تذكير متأخر' : days === 0 ? 'تذكير متكرر اليوم' : `تذكير متكرر خلال ${days} يوم`, tone: days < 0 ? 'danger' : 'purple' });
+    }
+
     for (const d of db.documents) {
       const h = evaluateDocumentHealth(d, db.preferences.documentWarningDays, today);
       if (h.needsFollowUp) {
@@ -153,6 +169,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     return list;
   }, [
     db.tasks,
+    db.calendarItems,
+    db.recurrenceSeries,
     db.documents,
     db.sessions,
     db.poas,

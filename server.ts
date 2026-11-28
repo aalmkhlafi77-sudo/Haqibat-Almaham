@@ -1,3 +1,4 @@
+import { startRecurrenceScheduler } from './server/recurrenceScheduler';
 import { answerAssistant, assistantConnection, assistantQuestion, verifyGeminiConnection } from './server/geminiAssistant';
 import { applyAssistantImport, draftAssistantImport, unpackImport } from './server/assistantImport';
 import { IMPORT_MAX_BYTES, IMPORT_MAX_METADATA_BYTES } from './src/domain/assistantImport';
@@ -769,6 +770,7 @@ async function startServer() {
 
   const port = Number(process.env.PORT || 3000);
   app.listen(port, '0.0.0.0', () => {
+    if (shared) startRecurrenceScheduler(store);
     console.log(`Haqibat Almaham server running on port ${port}`);
   });
 }

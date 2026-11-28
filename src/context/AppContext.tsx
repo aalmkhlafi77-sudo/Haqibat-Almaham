@@ -1,3 +1,4 @@
+import type { RecurrenceFrequency } from '../domain/recurrenceDates';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import {
   dataRepository,
@@ -142,7 +143,11 @@ interface AppContextValue {
   deleteProject: (id: string) => void;
   saveIdea: (idea: IdeaItem) => void;
   deleteIdea: (id: string) => void;
-  saveTask: (task: Omit<TaskItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }, ideaId?: string) => TaskItem;
+  configureRecurrence: (kind: 'task' | 'calendar_item', id: string, frequency: RecurrenceFrequency, until: string | null, reminderDays: number) => void;
+  stopRecurrence: (id: string) => void;
+  updateRecurrence: (id: string, until: string | null, reminderDays: number, frequency: RecurrenceFrequency) => void;
+  saveTask: (task: Omit<TaskItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }, ideaId?: string, applyFuture?: boolean) => TaskItem;
+  deleteRecurringFuture: (kind: 'task' | 'calendar_item', id: string) => void;
   deleteTask: (id: string) => void;
   saveDocument: (doc: Omit<DocumentItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId' | 'renewals'> & { id?: string; renewals?: DocumentRenewal[] }) => DocumentItem;
   recordDocumentRenewal: (documentId: string, renewal: Omit<DocumentRenewal, 'id' | 'documentId'>) => void;
@@ -153,7 +158,7 @@ interface AppContextValue {
   deleteSession: (id: string) => void;
   savePoa: (p: Omit<PoaItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }) => PoaItem;
   deletePoa: (id: string) => void;
-  saveCalendarItem: (ci: Omit<CalendarItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }) => CalendarItem;
+  saveCalendarItem: (ci: Omit<CalendarItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }, applyFuture?: boolean) => CalendarItem;
   deleteCalendarItem: (id: string) => void;
   saveLabel: (lbl: Omit<LabelItem, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => void;
   deleteLabel: (id: string) => void;
@@ -781,13 +786,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setDb(persist('deleteIdea', id));
   };
 
+  const configureRecurrence = (kind: 'task' | 'calendar_item', id: string, frequency: RecurrenceFrequency, until: string | null, reminderDays: number) => {
+    if (!hasPermission(currentUser, 'records:write')) return;
+    setDb(persist('configureRecurrence', kind, id, generateId('series'), frequency, until, reminderDays));
+  };
+  const updateRecurrence = (id: string, until: string | null, reminderDays: number, frequency: RecurrenceFrequency) => {
+    if (!hasPermission(currentUser, 'records:write')) return;
+    setDb(persist('updateRecurrence', id, until, reminderDays, frequency));
+  };
+  const stopRecurrence = (id: string) => {
+    if (!hasPermission(currentUser, 'records:write')) return;
+    setDb(persist('stopRecurrence', id));
+  };
+
+  const deleteRecurringFuture = (kind: 'task' | 'calendar_item', id: string) => {
+    if (!hasPermission(currentUser, 'records:delete')) return;
+    setDb(persist('deleteRecurringFuture', kind, id));
+    showToast('تم حذف الموعد المطلوب وإيقاف المواعيد القادمة.');
+  };
+
   const saveTask = (
-    input: Omit<TaskItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }, ideaId?: string
+    input: Omit<TaskItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }, ideaId?: string, applyFuture = false
   ): TaskItem => {
     const existing = input.id ? db.tasks.find((t) => t.id === input.id) : undefined;
     const item: TaskItem = {
       ...input,
       plannedDate: input.plannedDate === undefined ? existing?.plannedDate : input.plannedDate,
+      recurrenceSeriesId: existing?.recurrenceSeriesId, recurrenceIndex: existing?.recurrenceIndex,
       id: existing?.id ?? generateId('task'),
       orgId: existing?.orgId ?? 'org-01',
       createdAt: existing?.createdAt ?? nowIso(),
@@ -797,7 +822,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية تعديل المهام.');
       return existing ?? item;
     }
-    setDb(ideaId ? persist('createTaskFromIdea', item, ideaId) : persist('upsertTask', item));
+    setDb(ideaId ? persist('createTaskFromIdea', item, ideaId) : applyFuture ? persist('updateRecurringTaskFuture', item) : persist('upsertTask', item));
     return item;
   };
 
@@ -945,13 +970,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const saveCalendarItem = (
-    input: Omit<CalendarItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }
+    input: Omit<CalendarItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }, applyFuture = false
   ): CalendarItem => {
     const existing = input.id
       ? db.calendarItems.find((ci) => ci.id === input.id)
       : undefined;
     const item: CalendarItem = {
       ...input,
+      recurrenceSeriesId: existing?.recurrenceSeriesId, recurrenceIndex: existing?.recurrenceIndex,
       id: existing?.id ?? generateId('cal'),
       orgId: existing?.orgId ?? 'org-01',
       createdAt: existing?.createdAt ?? nowIso(),
@@ -961,7 +987,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('الحساب الحالي لا يملك صلاحية تعديل عناصر التقويم.');
       return existing ?? item;
     }
-    setDb(persist('upsertCalendarItem', item));
+    setDb(applyFuture ? persist('updateRecurringCalendarFuture', item) : persist('upsertCalendarItem', item));
     return item;
   };
 
@@ -1442,8 +1468,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteProject,
         saveIdea,
         deleteIdea,
+        configureRecurrence,
+        stopRecurrence,
+        updateRecurrence,
         saveTask,
         deleteTask,
+        deleteRecurringFuture,
         saveDocument,
         recordDocumentRenewal,
         deleteDocument,

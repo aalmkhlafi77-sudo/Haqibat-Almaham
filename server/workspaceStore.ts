@@ -23,7 +23,7 @@ export interface Workspace {
 export interface WorkspaceStore {
   mode: 'preview' | 'mysql';
   read(): Promise<Workspace>;
-  change(change: (workspace: Workspace) => void, keepRestorePoint?: boolean): Promise<Workspace>;
+  change(change: (workspace: Workspace) => void | boolean, keepRestorePoint?: boolean): Promise<Workspace>;
   users(): Promise<ServerUserAccount[]>;
   addUser(account: ServerUserAccount, firstOnly?: boolean): Promise<boolean>;
   changeUser(
@@ -40,7 +40,7 @@ export function createPreviewStore(): WorkspaceStore {
     async read() { return structuredClone(workspace); },
     async change(change) {
       const next = structuredClone(workspace);
-      change(next);
+      if (change(next) === false) return structuredClone(workspace);
       workspace = { state: next.state, revision: workspace.revision + 1 };
       return structuredClone(workspace);
     },
@@ -103,7 +103,7 @@ export async function openMysqlStore(): Promise<WorkspaceStore> {
     const revision = Number(row.revision);
     if (!Number.isSafeInteger(revision)) throw new Error('Invalid workspace revision.');
     const state: AppDatabaseState = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
-    return { revision, state: { ...state, projects: state.projects ?? [], ideas: state.ideas ?? [] } };
+    return { revision, state: { ...state, projects: state.projects ?? [], ideas: state.ideas ?? [], recurrenceSeries: state.recurrenceSeries ?? [] } };
   };
 
   try {
@@ -137,7 +137,7 @@ export async function openMysqlStore(): Promise<WorkspaceStore> {
       return transaction(async (connection) => {
         const previous = await read(connection, true);
         const next = { ...previous };
-        change(next);
+        if (change(next) === false) return previous;
         if (keepRestorePoint) {
           await connection.execute(
             'INSERT INTO haqibat_restore_points (revision, payload) VALUES (?, ?)',
