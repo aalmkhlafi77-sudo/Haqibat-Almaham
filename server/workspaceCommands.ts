@@ -86,6 +86,24 @@ const commands = {
     requireLink(state.specialists, item.specialistId); item.taskIds.forEach(id => requireLink(state.tasks, id)); item.documentIds.forEach(id => requireLink(state.documents, id));
     return repo.createProjectFromIdea(item, ideaId);
   }),
+  configureRecurrence: command(write, z.tuple([z.enum(['task', 'calendar_item']), schema.id, schema.id.max(48), z.enum(['weekly', 'fortnightly', 'monthly', 'yearly']), z.iso.date().nullable(), z.number().int().min(0).max(365)]), (repo, [kind, recordId, seriesId, frequency, until, reminderDays]) => {
+    const state = repo.load();
+    const record = kind === 'task' ? state.tasks.find(t => t.id === recordId) : state.calendarItems.find(c => c.id === recordId);
+    if (!record || record.recurrenceSeriesId || state.recurrenceSeries.some(s => s.id === seriesId)) throw new RequestError(409, 'السجل غير متاح أو مرتبط بسلسلة تكرار.');
+    const anchor = kind === 'task' ? (record as import('../src/types/domain').TaskItem).dueDate : (record as import('../src/types/domain').CalendarItem).scheduledAt.slice(0,10);
+    if (!z.iso.date().safeParse(anchor).success || (until && until < anchor)) throw new RequestError(400, 'تاريخ التكرار غير صالح.');
+    return repo.configureRecurrence(kind, recordId, seriesId, frequency, until, reminderDays);
+  }),
+  updateRecurrence: command(write, z.tuple([schema.id, z.iso.date().nullable(), z.number().int().min(0).max(365)]), (repo, [seriesId, until, reminderDays]) => {
+    const series = repo.load().recurrenceSeries.find(s => s.id === seriesId);
+    if (!series || !series.active) throw new RequestError(409, 'سلسلة التكرار غير متاحة أو متوقفة.');
+    if (until && until < series.anchor) throw new RequestError(400, 'تاريخ نهاية التكرار غير صالح.');
+    return repo.updateRecurrence(seriesId, until, reminderDays);
+  }),
+  stopRecurrence: command(write, oneId, (repo, [seriesId]) => {
+    if (!repo.load().recurrenceSeries.some(s => s.id === seriesId)) throw new RequestError(404, 'سلسلة التكرار غير موجودة.');
+    return repo.stopRecurrence(seriesId);
+  }),
   upsertTask: command(write, z.tuple([schema.taskItemSchema]), (repo, [item]) => {
     const state = repo.load();
     requireLink(state.taskTypes, item.typeId);
@@ -93,6 +111,8 @@ const commands = {
     requireLink(state.cases, item.caseId);
     requireLink(state.sessions, item.sessionId);
     requireLink(state.specialists, item.specialistId);
+    const previous = state.tasks.find(t => t.id === item.id);
+    if ((item.recurrenceSeriesId ?? null) !== (previous?.recurrenceSeriesId ?? null) || (item.recurrenceIndex ?? null) !== (previous?.recurrenceIndex ?? null)) throw new RequestError(409, 'لا يمكن تعديل ارتباط التكرار من خلال السجل.');
     return repo.upsertTask(item);
   }),
   deleteTask: command(remove, oneId, (repo, [id]) => repo.deleteTask(id)),
@@ -121,7 +141,11 @@ const commands = {
   deleteSession: command(remove, oneId, (repo, [id]) => repo.deleteSession(id)),
   upsertPoa: command(write, z.tuple([schema.poaItemSchema]), (repo, [item]) => repo.upsertPoa(item)),
   deletePoa: command(remove, oneId, (repo, [id]) => repo.deletePoa(id)),
-  upsertCalendarItem: command(write, z.tuple([schema.calendarItemSchema]), (repo, [item]) => repo.upsertCalendarItem(item)),
+  upsertCalendarItem: command(write, z.tuple([schema.calendarItemSchema]), (repo, [item]) => {
+    const previous = repo.load().calendarItems.find(c => c.id === item.id);
+    if ((item.recurrenceSeriesId ?? null) !== (previous?.recurrenceSeriesId ?? null) || (item.recurrenceIndex ?? null) !== (previous?.recurrenceIndex ?? null)) throw new RequestError(409, 'لا يمكن تعديل ارتباط التكرار من خلال السجل.');
+    return repo.upsertCalendarItem(item);
+  }),
   deleteCalendarItem: command(remove, oneId, (repo, [id]) => repo.deleteCalendarItem(id)),
   upsertLabel: command(write, z.tuple([schema.labelItemSchema]), (repo, [item]) => repo.upsertLabel(item)),
   deleteLabel: command(remove, oneId, (repo, [id]) => repo.deleteLabel(id)),

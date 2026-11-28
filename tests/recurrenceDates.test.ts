@@ -93,3 +93,41 @@ test('scheduler advances state once and leaves revision unchanged on subsequent 
   await runRecurrenceBatch(store, new Date('2027-01-08T13:00:00Z'));
   assert.equal((await store.read()).revision,first.revision);
 });
+
+import { applyWorkspaceCommand } from '../server/workspaceCommands';
+import type { AuthUser } from '../src/types/domain';
+test('recurrence configuration requires write permission and atomically links the original', () => {
+  const state = createSeedDatabase(); const workspace = {state,revision:1};
+  const source = state.tasks[0];
+  const body = {revision:1,name:'configureRecurrence',args:['task',source.id,'series-test','weekly',null,3]};
+  const reader = {permissions:['records:read']} as AuthUser;
+  const writer = {permissions:['records:read','records:write']} as AuthUser;
+  assert.throws(() => applyWorkspaceCommand(workspace,body,reader),/صلاحيات/);
+  applyWorkspaceCommand(workspace,body,writer);
+  assert.equal(workspace.state.recurrenceSeries[0].id,'series-test');
+  assert.equal(workspace.state.tasks.find(t=>t.id===source.id)?.recurrenceIndex,0);
+  assert.throws(() => applyWorkspaceCommand(workspace,body,writer),/مرتبط/);
+  applyWorkspaceCommand(workspace,{revision:1,name:'stopRecurrence',args:['series-test']},writer);
+  assert.equal(workspace.state.recurrenceSeries[0].active,false);
+});
+
+test('normal task writes cannot forge a recurrence link', () => {
+  const state = createSeedDatabase(); const workspace = {state,revision:2};
+  const writer = {permissions:['records:read','records:write']} as AuthUser;
+  const forged = {...state.tasks[0],recurrenceSeriesId:'forged',recurrenceIndex:0};
+  assert.throws(()=>applyWorkspaceCommand(workspace,{revision:2,name:'upsertTask',args:[forged]},writer),/ارتباط/);
+});
+
+test('series settings can be changed only with write permission and valid end date', () => {
+  const state = createSeedDatabase(); const workspace = {state, revision:3};
+  const writer = {permissions:['records:read','records:write']} as AuthUser;
+  const reader = {permissions:['records:read']} as AuthUser;
+  const t = state.tasks[0];
+  applyWorkspaceCommand(workspace,{revision:3,name:'configureRecurrence',args:['task',t.id,'s-edit','monthly',null,3]},writer);
+  const anchor = workspace.state.recurrenceSeries[0].anchor;
+  assert.throws(()=>applyWorkspaceCommand(workspace,{revision:3,name:'updateRecurrence',args:['s-edit',null,7]},reader),/صلاحيات/);
+  assert.throws(()=>applyWorkspaceCommand(workspace,{revision:3,name:'updateRecurrence',args:['s-edit','1900-01-01',7]},writer),/غير صالح/);
+  applyWorkspaceCommand(workspace,{revision:3,name:'updateRecurrence',args:['s-edit',null,7]},writer);
+  assert.equal(workspace.state.recurrenceSeries[0].reminderDays,7);
+  assert.equal(workspace.state.recurrenceSeries[0].anchor,anchor);
+});

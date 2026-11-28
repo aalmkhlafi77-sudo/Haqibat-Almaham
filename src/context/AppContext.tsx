@@ -1,3 +1,4 @@
+import type { RecurrenceFrequency } from '../domain/recurrenceDates';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import {
   dataRepository,
@@ -142,6 +143,9 @@ interface AppContextValue {
   deleteProject: (id: string) => void;
   saveIdea: (idea: IdeaItem) => void;
   deleteIdea: (id: string) => void;
+  configureRecurrence: (kind: 'task' | 'calendar_item', id: string, frequency: RecurrenceFrequency, until: string | null, reminderDays: number) => void;
+  stopRecurrence: (id: string) => void;
+  updateRecurrence: (id: string, until: string | null, reminderDays: number) => void;
   saveTask: (task: Omit<TaskItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }, ideaId?: string) => TaskItem;
   deleteTask: (id: string) => void;
   saveDocument: (doc: Omit<DocumentItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId' | 'renewals'> & { id?: string; renewals?: DocumentRenewal[] }) => DocumentItem;
@@ -781,6 +785,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setDb(persist('deleteIdea', id));
   };
 
+  const configureRecurrence = (kind: 'task' | 'calendar_item', id: string, frequency: RecurrenceFrequency, until: string | null, reminderDays: number) => {
+    if (!hasPermission(currentUser, 'records:write')) return;
+    setDb(persist('configureRecurrence', kind, id, generateId('series'), frequency, until, reminderDays));
+  };
+  const updateRecurrence = (id: string, until: string | null, reminderDays: number) => {
+    if (!hasPermission(currentUser, 'records:write')) return;
+    setDb(persist('updateRecurrence', id, until, reminderDays));
+  };
+  const stopRecurrence = (id: string) => {
+    if (!hasPermission(currentUser, 'records:write')) return;
+    setDb(persist('stopRecurrence', id));
+  };
+
   const saveTask = (
     input: Omit<TaskItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }, ideaId?: string
   ): TaskItem => {
@@ -788,6 +805,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const item: TaskItem = {
       ...input,
       plannedDate: input.plannedDate === undefined ? existing?.plannedDate : input.plannedDate,
+      recurrenceSeriesId: existing?.recurrenceSeriesId, recurrenceIndex: existing?.recurrenceIndex,
       id: existing?.id ?? generateId('task'),
       orgId: existing?.orgId ?? 'org-01',
       createdAt: existing?.createdAt ?? nowIso(),
@@ -952,6 +970,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       : undefined;
     const item: CalendarItem = {
       ...input,
+      recurrenceSeriesId: existing?.recurrenceSeriesId, recurrenceIndex: existing?.recurrenceIndex,
       id: existing?.id ?? generateId('cal'),
       orgId: existing?.orgId ?? 'org-01',
       createdAt: existing?.createdAt ?? nowIso(),
@@ -1442,6 +1461,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteProject,
         saveIdea,
         deleteIdea,
+        configureRecurrence,
+        stopRecurrence,
+        updateRecurrence,
         saveTask,
         deleteTask,
         saveDocument,

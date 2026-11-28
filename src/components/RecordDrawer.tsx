@@ -40,6 +40,7 @@ import {
 import { ArabicDatePicker } from './ArabicDatePicker';
 import { LabelsSection, WorkspacePinnedLabels } from './LabelsSection';
 import { StatusBadge } from './StatusBadge';
+import { RecurrenceControls } from './RecurrenceControls';
 
 export const RecordDrawer: React.FC = () => {
   const {
@@ -1848,6 +1849,8 @@ export const RecordDrawer: React.FC = () => {
               </div>
             </div>
           )}
+          {existingTask && <RecurrenceControls key={existingTask.id} kind="task" record={existingTask} />}
+          {existingCal && <RecurrenceControls key={existingCal.id} kind="calendar_item" record={existingCal} />}
         </form>
 
         {/* Footer Actions */}

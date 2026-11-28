@@ -1,3 +1,4 @@
+import type { RecurrenceFrequency } from '../domain/recurrenceDates';
 import { getTodayISO } from '../domain/dateUtils';
 import { normalizeArabicSearchText } from '../domain/searchUtils';
 import {
@@ -359,6 +360,9 @@ export interface DataRepository {
   deleteIdea(id: string): AppDatabaseState;
   createTaskFromIdea(task: TaskItem, ideaId: string): AppDatabaseState;
   createProjectFromIdea(project: ProjectItem, ideaId: string): AppDatabaseState;
+  configureRecurrence(kind: 'task' | 'calendar_item', recordId: string, seriesId: string, frequency: RecurrenceFrequency, until: string | null, reminderDays: number): AppDatabaseState;
+  stopRecurrence(seriesId: string): AppDatabaseState;
+  updateRecurrence(seriesId: string, until: string | null, reminderDays: number): AppDatabaseState;
   upsertTask(task: TaskItem): AppDatabaseState;
   deleteTask(taskId: string): AppDatabaseState;
   upsertDocument(doc: DocumentItem): AppDatabaseState;
@@ -597,6 +601,31 @@ export class StateDataRepository implements DataRepository {
     const next = { ...state, projects: [project, ...state.projects], ideas: state.ideas.map(i => i.id === ideaId ? { ...i, projectId: project.id, updatedAt: project.updatedAt } : i) };
     this.save(next);
     return next;
+  }
+
+  configureRecurrence(kind: 'task' | 'calendar_item', recordId: string, seriesId: string, frequency: RecurrenceFrequency, until: string | null, reminderDays: number): AppDatabaseState {
+    const state = this.readRaw();
+    const record = kind === 'task' ? state.tasks.find(t => t.id === recordId) : state.calendarItems.find(c => c.id === recordId);
+    if (!record || record.recurrenceSeriesId || state.recurrenceSeries.some(s => s.id === seriesId)) throw new Error('السجل غير متاح أو مرتبط بسلسلة تكرار.');
+    const anchor = kind === 'task' ? (record as TaskItem).dueDate : (record as CalendarItem).scheduledAt.slice(0,10);
+    const common = { id: seriesId, frequency, anchor, until, active: true, nextIndex: 1, reminderDays };
+    const series = kind === 'task' ? { ...common, kind: 'task' as const, template: record as TaskItem } : { ...common, kind: 'calendar_item' as const, template: record as CalendarItem };
+    const next = { ...state, recurrenceSeries: [...state.recurrenceSeries, series],
+      tasks: kind === 'task' ? state.tasks.map(t => t.id === recordId ? { ...t, recurrenceSeriesId: seriesId, recurrenceIndex: 0 } : t) : state.tasks,
+      calendarItems: kind === 'calendar_item' ? state.calendarItems.map(c => c.id === recordId ? { ...c, recurrenceSeriesId: seriesId, recurrenceIndex: 0 } : c) : state.calendarItems };
+    this.save(next); return next;
+  }
+
+  updateRecurrence(seriesId: string, until: string | null, reminderDays: number): AppDatabaseState {
+    const state = this.readRaw();
+    const next = { ...state, recurrenceSeries: state.recurrenceSeries.map(s => s.id === seriesId ? { ...s, until, reminderDays } : s) };
+    this.save(next); return next;
+  }
+
+  stopRecurrence(seriesId: string): AppDatabaseState {
+    const state = this.readRaw();
+    const next = { ...state, recurrenceSeries: state.recurrenceSeries.map(s => s.id === seriesId ? { ...s, active: false } : s) };
+    this.save(next); return next;
   }
 
   upsertTask(task: TaskItem): AppDatabaseState {
