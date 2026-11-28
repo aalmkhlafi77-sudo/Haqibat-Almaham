@@ -95,11 +95,11 @@ const commands = {
     if (!z.iso.date().safeParse(anchor).success || (until && until < anchor)) throw new RequestError(400, 'تاريخ التكرار غير صالح.');
     return repo.configureRecurrence(kind, recordId, seriesId, frequency, until, reminderDays);
   }),
-  updateRecurrence: command(write, z.tuple([schema.id, z.iso.date().nullable(), z.number().int().min(0).max(365)]), (repo, [seriesId, until, reminderDays]) => {
+  updateRecurrence: command(write, z.tuple([schema.id, z.iso.date().nullable(), z.number().int().min(0).max(365), z.enum(['weekly', 'fortnightly', 'monthly', 'yearly'])]), (repo, [seriesId, until, reminderDays, frequency]) => {
     const series = repo.load().recurrenceSeries.find(s => s.id === seriesId);
     if (!series || !series.active) throw new RequestError(409, 'سلسلة التكرار غير متاحة أو متوقفة.');
     if (until && until < series.anchor) throw new RequestError(400, 'تاريخ نهاية التكرار غير صالح.');
-    return repo.updateRecurrence(seriesId, until, reminderDays);
+    return repo.updateRecurrence(seriesId, until, reminderDays, frequency);
   }),
   stopRecurrence: command(write, oneId, (repo, [seriesId]) => {
     if (!repo.load().recurrenceSeries.some(s => s.id === seriesId)) throw new RequestError(404, 'سلسلة التكرار غير موجودة.');

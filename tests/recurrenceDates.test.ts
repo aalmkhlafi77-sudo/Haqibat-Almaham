@@ -42,7 +42,7 @@ test('separate occurrences keep overdue task intact and clear completion and pla
 
 import { materializeRecurrences } from '../server/recurrenceWorkspace';
 import { createBackupEnvelope, validateBackupFileText } from '../src/domain/backupUtils';
-import { migrateDatabaseState } from '../src/data/repository';
+import { migrateDatabaseState, StateDataRepository } from '../src/data/repository';
 
 test('materialization produces immutable deterministic records, catches up, and respects reminder lead', () => {
   const state = createSeedDatabase();
@@ -125,9 +125,9 @@ test('series settings can be changed only with write permission and valid end da
   const t = state.tasks[0];
   applyWorkspaceCommand(workspace,{revision:3,name:'configureRecurrence',args:['task',t.id,'s-edit','monthly',null,3]},writer);
   const anchor = workspace.state.recurrenceSeries[0].anchor;
-  assert.throws(()=>applyWorkspaceCommand(workspace,{revision:3,name:'updateRecurrence',args:['s-edit',null,7]},reader),/صلاحيات/);
-  assert.throws(()=>applyWorkspaceCommand(workspace,{revision:3,name:'updateRecurrence',args:['s-edit','1900-01-01',7]},writer),/غير صالح/);
-  applyWorkspaceCommand(workspace,{revision:3,name:'updateRecurrence',args:['s-edit',null,7]},writer);
+  assert.throws(()=>applyWorkspaceCommand(workspace,{revision:3,name:'updateRecurrence',args:['s-edit',null,7,'weekly']},reader),/صلاحيات/);
+  assert.throws(()=>applyWorkspaceCommand(workspace,{revision:3,name:'updateRecurrence',args:['s-edit','1900-01-01',7,'weekly']},writer),/غير صالح/);
+  applyWorkspaceCommand(workspace,{revision:3,name:'updateRecurrence',args:['s-edit',null,7,'weekly']},writer);
   assert.equal(workspace.state.recurrenceSeries[0].reminderDays,7);
   assert.equal(workspace.state.recurrenceSeries[0].anchor,anchor);
 });
@@ -187,4 +187,16 @@ test('authenticated API persists recurrence, rejects stale revision and restores
   assert.equal(parsed.ok,true); assert.doesNotThrow(()=>assertRestorableWorkspace(migrateDatabaseState(parsed.envelope!.payload)));
   const damaged=structuredClone(final.state); damaged.tasks.find(t=>t.id===task.id)!.recurrenceIndex=900;
   assert.throws(()=>assertRestorableWorkspace(damaged),/تكرار/);
+});
+
+test('changing cadence preserves generated occurrences and continues after the last existing date', () => {
+  const state = createSeedDatabase(); const template = state.tasks[0];
+  state.recurrenceSeries = [{id:'change-s',kind:'task',template,frequency:'monthly',anchor:'2027-01-31',until:null,active:true,nextIndex:3,reminderDays:0}];
+  let current=state; const repo = new StateDataRepository(()=>current,next=>{current=next});
+  repo.updateRecurrence('change-s',null,0,'weekly');
+  const changed = current.recurrenceSeries[0];
+  assert.equal(changed.phaseAnchor,'2027-03-31'); assert.equal(changed.phaseStartIndex,2);
+  const next=generateOccurrences(changed,'2027-04-07','2027-04-07T00:00:00Z');
+  assert.equal(next.occurrences[0].date,'2027-04-07'); assert.equal(next.occurrences[0].index,3);
+  assert.doesNotThrow(()=>assertRestorableWorkspace(current));
 });

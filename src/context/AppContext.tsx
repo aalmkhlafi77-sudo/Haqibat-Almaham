@@ -145,7 +145,7 @@ interface AppContextValue {
   deleteIdea: (id: string) => void;
   configureRecurrence: (kind: 'task' | 'calendar_item', id: string, frequency: RecurrenceFrequency, until: string | null, reminderDays: number) => void;
   stopRecurrence: (id: string) => void;
-  updateRecurrence: (id: string, until: string | null, reminderDays: number) => void;
+  updateRecurrence: (id: string, until: string | null, reminderDays: number, frequency: RecurrenceFrequency) => void;
   saveTask: (task: Omit<TaskItem, 'id' | 'createdAt' | 'updatedAt' | 'orgId'> & { id?: string }, ideaId?: string, applyFuture?: boolean) => TaskItem;
   deleteRecurringFuture: (kind: 'task' | 'calendar_item', id: string) => void;
   deleteTask: (id: string) => void;
@@ -790,9 +790,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!hasPermission(currentUser, 'records:write')) return;
     setDb(persist('configureRecurrence', kind, id, generateId('series'), frequency, until, reminderDays));
   };
-  const updateRecurrence = (id: string, until: string | null, reminderDays: number) => {
+  const updateRecurrence = (id: string, until: string | null, reminderDays: number, frequency: RecurrenceFrequency) => {
     if (!hasPermission(currentUser, 'records:write')) return;
-    setDb(persist('updateRecurrence', id, until, reminderDays));
+    setDb(persist('updateRecurrence', id, until, reminderDays, frequency));
   };
   const stopRecurrence = (id: string) => {
     if (!hasPermission(currentUser, 'records:write')) return;

@@ -4,6 +4,8 @@ import type { CalendarItem, TaskItem } from '../types/domain';
 export type RecurrenceSeries = {
   id: string;
   frequency: RecurrenceFrequency;
+  phaseAnchor?: string;
+  phaseStartIndex?: number;
   anchor: string;
   until: string | null;
   active: boolean;
@@ -29,7 +31,8 @@ export function generateOccurrences(series: RecurrenceSeries, cutoff: string, no
 } {
   if (!series.active) return { series, occurrences: [], hasMore: false };
   if (!series.id || !Number.isInteger(series.reminderDays) || series.reminderDays < 0 || series.reminderDays > 365) throw new Error('Invalid recurrence settings');
-  const batch = dueOccurrences({ anchor: series.anchor, frequency: series.frequency, nextIndex: series.nextIndex, cutoff, until: series.until, limit });
+  const phaseIndex = series.phaseStartIndex ?? 0;
+  const batch = dueOccurrences({ anchor: series.phaseAnchor ?? series.anchor, frequency: series.frequency, nextIndex: series.nextIndex - phaseIndex, cutoff, until: series.until, limit });
   const occurrences = batch.dates.map((date, offset): RecurrenceOccurrence => {
     const index = series.nextIndex + offset;
     const id = `rec-${series.id}-${index}`;
@@ -44,5 +47,5 @@ export function generateOccurrences(series: RecurrenceSeries, cutoff: string, no
       ...series.template, id, recurrenceSeriesId: series.id, recurrenceIndex: index, scheduledAt: `${date}${time}`, isDone: false, createdAt: now, updatedAt: now,
     } };
   });
-  return { series: { ...series, nextIndex: batch.nextIndex }, occurrences, hasMore: batch.hasMore };
+  return { series: { ...series, nextIndex: batch.nextIndex + phaseIndex }, occurrences, hasMore: batch.hasMore };
 }

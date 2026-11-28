@@ -1,4 +1,4 @@
-import type { RecurrenceFrequency } from '../domain/recurrenceDates';
+import { recurrenceDate, type RecurrenceFrequency } from '../domain/recurrenceDates';
 import { getTodayISO } from '../domain/dateUtils';
 import { normalizeArabicSearchText } from '../domain/searchUtils';
 import {
@@ -362,7 +362,7 @@ export interface DataRepository {
   createProjectFromIdea(project: ProjectItem, ideaId: string): AppDatabaseState;
   configureRecurrence(kind: 'task' | 'calendar_item', recordId: string, seriesId: string, frequency: RecurrenceFrequency, until: string | null, reminderDays: number): AppDatabaseState;
   stopRecurrence(seriesId: string): AppDatabaseState;
-  updateRecurrence(seriesId: string, until: string | null, reminderDays: number): AppDatabaseState;
+  updateRecurrence(seriesId: string, until: string | null, reminderDays: number, frequency: RecurrenceFrequency): AppDatabaseState;
   updateRecurringTaskFuture(task: TaskItem): AppDatabaseState;
   updateRecurringCalendarFuture(item: CalendarItem): AppDatabaseState;
   deleteRecurringFuture(kind: 'task' | 'calendar_item', recordId: string): AppDatabaseState;
@@ -621,9 +621,15 @@ export class StateDataRepository implements DataRepository {
     this.save(next); return next;
   }
 
-  updateRecurrence(seriesId: string, until: string | null, reminderDays: number): AppDatabaseState {
+  updateRecurrence(seriesId: string, until: string | null, reminderDays: number, frequency: RecurrenceFrequency): AppDatabaseState {
     const state = this.readRaw();
-    const next = { ...state, recurrenceSeries: state.recurrenceSeries.map(s => s.id === seriesId ? { ...s, until, reminderDays } : s) };
+    const next = { ...state, recurrenceSeries: state.recurrenceSeries.map(s => {
+      if (s.id !== seriesId) return s;
+      if (frequency === s.frequency) return { ...s, until, reminderDays };
+      const lastIndex = s.nextIndex - 1;
+      const lastDate = recurrenceDate(s.phaseAnchor ?? s.anchor, s.frequency, lastIndex - (s.phaseStartIndex ?? 0));
+      return { ...s, until, reminderDays, frequency, phaseAnchor: lastDate, phaseStartIndex: lastIndex };
+    }) };
     this.save(next); return next;
   }
 
