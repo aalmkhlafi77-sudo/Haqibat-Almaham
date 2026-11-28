@@ -52,6 +52,7 @@ export const RecordDrawer: React.FC = () => {
     openShareModal,
     saveTask,
     deleteTask,
+    deleteRecurringFuture,
     saveDocument,
     recordDocumentRenewal,
     deleteDocument,
@@ -69,6 +70,8 @@ export const RecordDrawer: React.FC = () => {
   const canWriteRecords = hasPerm('records:write');
   const canDeleteRecords = hasPerm('records:delete');
 
+  const [applyFuture, setApplyFuture] = useState(false);
+  const [deleteFuture, setDeleteFuture] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [discardPromptOpen, setDiscardPromptOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -94,6 +97,8 @@ export const RecordDrawer: React.FC = () => {
   useEffect(() => {
     if (!activeRecord) return;
     setIsDirty(false);
+    setApplyFuture(false);
+    setDeleteFuture(false);
     setDiscardPromptOpen(false);
     setDeleteConfirmOpen(!!activeRecord?.openDelete);
     setValidationError('');
@@ -298,7 +303,7 @@ export const RecordDrawer: React.FC = () => {
         sessionId: taskForm.sessionId || null,
         notes: taskForm.notes || '',
         archivedAt: taskForm.archivedAt || null,
-      }, !activeRecord.id && typeof activeRecord.prefill?.ideaId === 'string' ? activeRecord.prefill.ideaId : undefined);
+      }, !activeRecord.id && typeof activeRecord.prefill?.ideaId === 'string' ? activeRecord.prefill.ideaId : undefined, applyFuture);
       setIsDirty(false);
       showToast('تم حفظ المهمة بنجاح.');
       openRecord('task', saved.id);
@@ -421,7 +426,7 @@ export const RecordDrawer: React.FC = () => {
         linkedRecordId: calForm.linkedRecordId || null,
         notes: calForm.notes || '',
         isDone: !!calForm.isDone,
-      });
+      }, applyFuture);
       setIsDirty(false);
       showToast('تم حفظ العنصر في التقويم.');
       openRecord('calendar_item', saved.id);
@@ -440,6 +445,7 @@ export const RecordDrawer: React.FC = () => {
     }
     setDeleteConfirmOpen(false);
     closeRecord();
+    if (deleteFuture && (activeRecord.type === 'task' || activeRecord.type === 'calendar_item')) { deleteRecurringFuture(activeRecord.type, id); return; }
     if (activeRecord.type === 'task') deleteTask(id);
     else if (activeRecord.type === 'case') deleteCase(id);
     else if (activeRecord.type === 'session') deleteSession(id);
@@ -1849,6 +1855,7 @@ export const RecordDrawer: React.FC = () => {
               </div>
             </div>
           )}
+          {((existingTask?.recurrenceSeriesId && db.recurrenceSeries.some(s => s.id === existingTask.recurrenceSeriesId && s.active)) || (existingCal?.recurrenceSeriesId && db.recurrenceSeries.some(s => s.id === existingCal.recurrenceSeriesId && s.active))) && canWriteRecords && <label className="mt-4 flex items-start gap-2 text-sm"><input type="checkbox" checked={applyFuture} onChange={e => setApplyFuture(e.target.checked)} /><span>تطبيق التعديلات على هذا الموعد والمواعيد القادمة غير المكتملة. تبقى تواريخ الاستحقاق مستقلة.</span></label>}
           {existingTask && <RecurrenceControls key={existingTask.id} kind="task" record={existingTask} />}
           {existingCal && <RecurrenceControls key={existingCal.id} kind="calendar_item" record={existingCal} />}
         </form>
@@ -2056,6 +2063,7 @@ export const RecordDrawer: React.FC = () => {
                 <p className="text-sm text-slate-700 dark:text-slate-200">
                   هل أنت متأكد من حذف «<span className="font-bold">{deleteImpact.title}</span>»؟
                 </p>
+                {((existingTask?.recurrenceSeriesId) || (existingCal?.recurrenceSeriesId)) && <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={deleteFuture} onChange={e => setDeleteFuture(e.target.checked)} /><span>حذف هذا الموعد والمواعيد القادمة غير المكتملة وإيقاف السلسلة. تبقى السجلات المكتملة الأخرى.</span></label>}
                 {deleteImpact.impactLines.length > 0 && (
                   <div className="rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 p-3 space-y-1">
                     <div className="text-xs font-bold text-amber-800 dark:text-amber-200">

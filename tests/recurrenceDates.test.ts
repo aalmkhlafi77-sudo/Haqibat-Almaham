@@ -131,3 +131,60 @@ test('series settings can be changed only with write permission and valid end da
   assert.equal(workspace.state.recurrenceSeries[0].reminderDays,7);
   assert.equal(workspace.state.recurrenceSeries[0].anchor,anchor);
 });
+
+test('future edit updates pending records and template but preserves completion and due dates', () => {
+  const state = createSeedDatabase(), workspace = { state, revision: 4 };
+  const writer = {permissions:['records:read','records:write','records:delete']} as AuthUser;
+  const original = state.tasks[0];
+  applyWorkspaceCommand(workspace,{revision:4,name:'configureRecurrence',args:['task',original.id,'future-s','weekly',null,0]},writer);
+  const series = workspace.state.recurrenceSeries[0];
+  const generated = generateOccurrences(series,recurrenceDate(series.anchor,'weekly',2),'2028-01-01T00:00:00Z');
+  workspace.state.tasks.push(...generated.occurrences.filter(o=>o.kind==='task').map(o=>o.record as typeof original));
+  workspace.state.tasks.at(-1)!.status = 'مكتملة';
+  const edited = {...workspace.state.tasks.find(t=>t.id===original.id)!,title:'عنوان جديد'};
+  applyWorkspaceCommand(workspace,{revision:4,name:'updateRecurringTaskFuture',args:[edited]},writer);
+  const pending = workspace.state.tasks.find(t=>t.recurrenceSeriesId==='future-s' && t.recurrenceIndex===1)!;
+  const done = workspace.state.tasks.find(t=>t.recurrenceSeriesId==='future-s' && t.recurrenceIndex===2)!;
+  assert.equal(pending.title,'عنوان جديد'); assert.equal(done.title,original.title);
+  assert.equal(pending.dueDate,recurrenceDate(series.anchor,'weekly',1));
+  assert.equal(workspace.state.recurrenceSeries[0].template.title,'عنوان جديد');
+  applyWorkspaceCommand(workspace,{revision:4,name:'deleteRecurringFuture',args:['task',original.id]},writer);
+  assert.equal(workspace.state.recurrenceSeries[0].active,false);
+  assert.equal(workspace.state.tasks.some(t=>t.id===original.id),false);
+  assert.equal(workspace.state.tasks.some(t=>t.id===pending.id),false);
+  assert.equal(workspace.state.tasks.some(t=>t.id===done.id),true);
+});
+
+test('materialization clears removed specialist and document references before generating', () => {
+  const state = createSeedDatabase();
+  const template = {...state.tasks[0],specialistId:'missing-person',documentId:'missing-document'};
+  state.recurrenceSeries = [{id:'clean-s',kind:'task',template,frequency:'weekly',anchor:'2027-01-01',until:null,active:true,nextIndex:1,reminderDays:0}];
+  const result = materializeRecurrences(state,'2027-01-08','2027-01-08T00:00:00Z');
+  assert.equal(result.state.tasks.at(-1)?.specialistId,null);
+  assert.equal(result.state.tasks.at(-1)?.documentId,null);
+  assert.equal(result.state.recurrenceSeries[0].template.specialistId,null);
+});
+
+import { once } from 'node:events';
+import { createServerApp } from '../server';
+import { assertRestorableWorkspace } from '../server/workspaceCommands';
+
+test('authenticated API persists recurrence, rejects stale revision and restores valid backup snapshot', async t => {
+  const store = createPreviewStore();
+  const server = createServerApp(store).listen(0,'127.0.0.1'); await once(server,'listening');
+  t.after(()=>new Promise<void>(resolve=>server.close(()=>resolve())));
+  const port = (server.address() as {port:number}).port; const base = `http://127.0.0.1:${port}`;
+  const headers = {'X-Requested-With':'XMLHttpRequest','Content-Type':'application/json'};
+  const login = await fetch(`${base}/api/auth/bootstrap-admin`,{method:'POST',headers,body:JSON.stringify({username:'testrec',password:'test-password'})});
+  assert.equal(login.status,201); const cookie=login.headers.get('set-cookie')!.split(';')[0];
+  const snapshot = await (await fetch(`${base}/api/state`,{headers:{cookie}})).json();
+  const task = snapshot.state.tasks[0];
+  const body = {revision:snapshot.revision,name:'configureRecurrence',args:['task',task.id,'http-series','weekly',null,2]};
+  const send=()=>fetch(`${base}/api/state/commands`,{method:'POST',headers:{...headers,cookie},body:JSON.stringify(body)});
+  assert.equal((await send()).status,200); assert.equal((await send()).status,409);
+  const final = await store.read(); assert.equal(final.state.recurrenceSeries.length,1);
+  const backup = createBackupEnvelope(final.state,'server'); const parsed = validateBackupFileText(JSON.stringify(backup));
+  assert.equal(parsed.ok,true); assert.doesNotThrow(()=>assertRestorableWorkspace(migrateDatabaseState(parsed.envelope!.payload)));
+  const damaged=structuredClone(final.state); damaged.tasks.find(t=>t.id===task.id)!.recurrenceIndex=900;
+  assert.throws(()=>assertRestorableWorkspace(damaged),/تكرار/);
+});

@@ -74,6 +74,7 @@ const commands = {
   deleteIdea: command(remove, oneId, (repo, [id]) => repo.deleteIdea(id)),
   createTaskFromIdea: command(write, z.tuple([schema.taskItemSchema, schema.id]), (repo, [item, ideaId]) => {
     const state = repo.load();
+    if (item.recurrenceSeriesId != null || item.recurrenceIndex != null) throw new RequestError(409, 'لا يمكن إنشاء ارتباط تكرار بهذه الطريقة.');
     const idea = state.ideas.find(i => i.id === ideaId);
     if (!idea || idea.taskId || state.tasks.some(t => t.id === item.id)) throw new RequestError(409, 'الفكرة غير متاحة أو مرتبطة بمهمة بالفعل.');
     requireLink(state.taskTypes, item.typeId); requireLink(state.documents, item.documentId); requireLink(state.cases, item.caseId); requireLink(state.sessions, item.sessionId); requireLink(state.specialists, item.specialistId);
@@ -103,6 +104,23 @@ const commands = {
   stopRecurrence: command(write, oneId, (repo, [seriesId]) => {
     if (!repo.load().recurrenceSeries.some(s => s.id === seriesId)) throw new RequestError(404, 'سلسلة التكرار غير موجودة.');
     return repo.stopRecurrence(seriesId);
+  }),
+  updateRecurringTaskFuture: command(write, z.tuple([schema.taskItemSchema]), (repo, [item]) => {
+    const state = repo.load(); const previous = state.tasks.find(t => t.id === item.id);
+    if (!previous?.recurrenceSeriesId || previous.recurrenceSeriesId !== item.recurrenceSeriesId || previous.recurrenceIndex !== item.recurrenceIndex || !state.recurrenceSeries.some(s => s.id === previous.recurrenceSeriesId && s.kind === 'task' && s.active)) throw new RequestError(409, 'سلسلة المهمة غير متاحة.');
+    requireLink(state.taskTypes, item.typeId); requireLink(state.documents, item.documentId); requireLink(state.cases, item.caseId); requireLink(state.sessions, item.sessionId); requireLink(state.specialists, item.specialistId);
+    return repo.updateRecurringTaskFuture(item);
+  }),
+  updateRecurringCalendarFuture: command(write, z.tuple([schema.calendarItemSchema]), (repo, [item]) => {
+    const state = repo.load(); const previous = state.calendarItems.find(c => c.id === item.id);
+    if (!previous?.recurrenceSeriesId || previous.recurrenceSeriesId !== item.recurrenceSeriesId || previous.recurrenceIndex !== item.recurrenceIndex || !state.recurrenceSeries.some(s => s.id === previous.recurrenceSeriesId && s.kind === 'calendar_item' && s.active)) throw new RequestError(409, 'سلسلة التذكير غير متاحة.');
+    requireLink(state.specialists, item.specialistId);
+    return repo.updateRecurringCalendarFuture(item);
+  }),
+  deleteRecurringFuture: command(remove, z.tuple([z.enum(['task','calendar_item']), schema.id]), (repo, [kind, id]) => {
+    const state = repo.load(); const record = kind === 'task' ? state.tasks.find(t => t.id === id) : state.calendarItems.find(c => c.id === id);
+    if (!record?.recurrenceSeriesId || record.recurrenceIndex == null || !state.recurrenceSeries.some(s => s.id === record.recurrenceSeriesId && s.kind === kind)) throw new RequestError(409, 'السجل غير مرتبط بسلسلة تكرار.');
+    return repo.deleteRecurringFuture(kind, id);
   }),
   upsertTask: command(write, z.tuple([schema.taskItemSchema]), (repo, [item]) => {
     const state = repo.load();
@@ -198,6 +216,18 @@ export function assertRestorableWorkspace(state: AppDatabaseState) {
     if (new Set(entries.map((entry) => entry.id)).size !== entries.length ||
         !z.array(workspaceCollections[field] as z.ZodType).safeParse(entries).success) {
       throw new RequestError(400, `تحتوي النسخة الاحتياطية على سجلات مكررة أو غير صالحة في ${field}.`);
+    }
+  }
+
+  const seenOccurrences = new Set<string>();
+  for (const [kind, records] of [['task', state.tasks], ['calendar_item', state.calendarItems]] as const) {
+    for (const record of records) {
+      if (record.recurrenceSeriesId == null && record.recurrenceIndex == null) continue;
+      const series = state.recurrenceSeries.find(s => s.id === record.recurrenceSeriesId && s.kind === kind);
+      if (!series || record.recurrenceIndex == null || record.recurrenceIndex >= series.nextIndex) throw new RequestError(400, 'تحتوي النسخة الاحتياطية على ارتباط تكرار غير صالح.');
+      const key = `${series.id}:${record.recurrenceIndex}`;
+      if (seenOccurrences.has(key)) throw new RequestError(400, 'تحتوي النسخة الاحتياطية على موعد متكرر مكرر.');
+      seenOccurrences.add(key);
     }
   }
 
